@@ -239,3 +239,14 @@ test('init --statusline: project or --global, keeps a foreign status line unless
     assert.equal(spawnSync('sh', ['-c', cmd], { encoding: 'utf8' }).stdout, 'v0.10.1 statusline\n');
   }
 });
+
+test('init --team commits the logs, --private keeps .cts/ out of git again', () => {
+  const root = proj(), gi = path.join(root, '.cts', '.gitignore');
+  assert.match(cts(root, 'init').stdout, /stays out of git/);
+  assert.match(fs.readFileSync(gi, 'utf8'), /^\*$/m);
+  assert.match(cts(root, 'init', '--team').stdout, /team mode/);
+  assert.doesNotMatch(fs.readFileSync(gi, 'utf8'), /^\*$/m);
+  assert.match(cts(root, 'init').stdout, /team mode/, 'a plain init keeps the chosen mode');
+  cts(root, 'init', '--private');
+  assert.match(fs.readFileSync(gi, 'utf8'), /^\*$/m);
+});

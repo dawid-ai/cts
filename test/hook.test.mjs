@@ -76,7 +76,7 @@ test('every hook event produces exactly one valid, attributed JSONL line and no 
   assert.match(evs.find((e) => e.hook === 'UserPromptSubmit').d.text, /\[redacted\]/, 'secrets never enter the log');
   assert.ok(!JSON.stringify(evs).includes('abcdefghijklmnopqrstuvwxyz123456'));
   assert.deepEqual(evs.find((e) => e.hook === 'Notification').d.extra.message, 'Claude needs your permission');
-  assert.ok(fs.existsSync(path.join(paths(root).cts, '.gitignore')));
+  assert.match(fs.readFileSync(path.join(paths(root).cts, '.gitignore'), 'utf8'), /^\*$/m, '.cts/ stays out of git by default');
 });
 
 test('three concurrent subagents produce three attributed lanes joined to their own transcripts', () => {
@@ -216,4 +216,21 @@ test('SessionStart tips about the status line once, and only when none is set', 
   fs.writeFileSync(path.join(claude, 'settings.json'), '{}');
   assert.match(msg(), /\/cts:init --statusline --global/);
   assert.equal(msg(), undefined, 'shown once');
+});
+
+test('SessionStart upgrades the old .cts/.gitignore to private, unless git already tracks the logs', () => {
+  const legacy = 'index.sqlite*\nserver.json\npaused\nhooks.log\ncontext.json\n';
+  const setup = (track) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-git-'));
+    const g = (...a) => spawnSync('git', ['-C', root, ...a], { encoding: 'utf8' });
+    g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 'T');
+    fs.mkdirSync(path.join(root, '.cts', 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.cts', '.gitignore'), legacy);
+    fs.writeFileSync(path.join(root, '.cts', 'sessions', 'old.jsonl'), '');
+    if (track) { g('add', '.cts'); g('commit', '-q', '-m', 'logs'); }
+    fire(root, { hook_event_name: 'SessionStart', source: 'startup' });
+    return fs.readFileSync(path.join(root, '.cts', '.gitignore'), 'utf8');
+  };
+  assert.match(setup(false), /^\*$/m);
+  assert.equal(setup(true), legacy, 'a team already sharing the logs keeps sharing them');
 });

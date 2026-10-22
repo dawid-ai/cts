@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
+import { execFileSync } from 'node:child_process';
 
 export const SCHEMA = 1;
 /** Node flags for the long-running dashboard server: a small young generation keeps steady memory near the live data. */
@@ -148,13 +149,30 @@ function deepMerge(a, b) {
   return a;
 }
 
+// .cts/ stays out of git unless the project opts in (`cts init --team`): then the logs are committed and only caches stay local.
+const CACHES = 'index.sqlite*\nserver.json\npaused\nhooks.log\ncontext.json\n';
+export const GITIGNORE = { private: '# CTS keeps this folder out of git. `cts init --team` commits the session logs instead.\n*\n', team: '# CTS team mode: session logs are committed, caches stay local. `cts init --private` undoes it.\n' + CACHES, legacy: CACHES };
+
 export function ensureProject(root) {
   const p = paths(root);
   fs.mkdirSync(p.sessions, { recursive: true });
   if (!exists(p.config)) fs.writeFileSync(p.config, JSON.stringify({ schema: SCHEMA }, null, 2) + '\n');
   const gi = path.join(p.cts, '.gitignore');
-  if (!exists(gi)) fs.writeFileSync(gi, 'index.sqlite*\nserver.json\npaused\nhooks.log\ncontext.json\n');
+  if (!exists(gi)) fs.writeFileSync(gi, GITIGNORE.private);
   return p;
+}
+
+/** Write .cts/.gitignore for a mode ('private' or 'team'). With no mode, upgrade the pre-0.2.2 default to private unless git already tracks the logs. */
+export function gitMode(root, mode) {
+  const gi = path.join(paths(root).cts, '.gitignore');
+  if (mode) { fs.writeFileSync(gi, GITIGNORE[mode]); return mode; }
+  let cur = ''; try { cur = fs.readFileSync(gi, 'utf8'); } catch { return null; }
+  if (cur !== GITIGNORE.legacy) return cur === GITIGNORE.team ? 'team' : 'private';
+  let tracked = '';
+  try { tracked = execFileSync('git', ['-C', root, 'ls-files', '--', '.cts/sessions'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not a repo: nothing tracked */ }
+  if (tracked) return 'team';
+  fs.writeFileSync(gi, GITIGNORE.private);
+  return 'private';
 }
 
 export function pidAlive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }

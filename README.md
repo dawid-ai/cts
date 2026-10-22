@@ -176,7 +176,7 @@ with any separator or none (`my app`, `my-app`, `my_app`, `my/app`, `myapp`). Yo
 `/cts:pause` stops capture entirely (the gap is logged with no content). `"private": true` in `.cts/cts.json` disables share and export.
 
 **Per-person consent.** Prompts carry `d.who`, a short hash of the person (`CTS_USER`, `"me"` in `~/.cts/config.json`, or the OS user),
-never the name. `cts consent summary` stores your choice in `.cts/cts.json` under `people`, so teammates who commit `.cts/` honour it:
+never the name. `cts consent summary` stores your choice in `.cts/cts.json` under `people`, so teammates in team mode (`cts init --team`) honour it:
 your prompts are withheld (replaced by a word count) from the story page, cards, Markdown export, events export, replay and drafts.
 `"share": { "prompts": "summary" }` sets the project default. Your local dashboard always shows everything.
 A prompt given to `claude -p` or the SDKs (an app's own agent calls, a script) belongs to its caller: it sits in a **claude -p** lane,
@@ -191,7 +191,9 @@ re-score them, because their raw events are gone.
 
 ## Storage
 
-`.cts/` is meant to be committed: `sessions/*.jsonl` (plus `retention.json` after a trim) is the source of truth, `index.sqlite` is git-ignored and rebuilt with
+`.cts/` stays out of git by default: its own `.gitignore` holds `*`, so the project's `.gitignore` needs no edit. `cts init --team`
+commits it instead (`--private` undoes that); a pre-0.2.2 project whose logs git already tracks stays shared.
+`sessions/*.jsonl` (plus `retention.json` after a trim) is the source of truth, `index.sqlite` is never committed and is rebuilt with
 `cts reindex` (verified to reproduce the dashboard exactly), `evidence/` holds transcript spans copied when a moment is
 extracted so evidence outlives transcript cleanup, `digests/` holds Markdown digests, `cts.json` holds config.
 Truncated or corrupt lines are skipped, never fatal. A session file that shrinks or disappears (a trim, `cts demo clear`, a git

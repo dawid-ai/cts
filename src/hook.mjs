@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findRoot, ensureProject, paths, serialize, pidAlive, readJson, ago, loadConfig, SERVER_FLAGS } from './lib/util.mjs';
+import { findRoot, ensureProject, gitMode, paths, serialize, pidAlive, readJson, ago, loadConfig, SERVER_FLAGS } from './lib/util.mjs';
 import { normalize } from './lib/normalize.mjs';
 import { register } from './lib/registry.mjs';
 import { tip } from './lib/statusline.mjs';
@@ -73,6 +73,7 @@ try {
   }
   if (inp.hook_event_name === 'SessionStart') {
     try { register(root); } catch (e) { logFail(root, e); }
+    try { gitMode(root); } catch (e) { logFail(root, e); }
     startServer(root, p);
     const paused = fs.existsSync(p.paused);
     const note = paused ? null : contextNote(p);

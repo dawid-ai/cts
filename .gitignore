@@ -1,6 +1,7 @@
-# Kept local, not published: the product spec, release zips, and the old standalone marketplace
+# Kept local, not published: the product spec, the work handover, release zips, and the old standalone marketplace
 # (CTS installs from the claude-skills marketplace, which points at this repo).
 CTS.md
+handover.md
 cts-*.zip
 .claude-plugin/marketplace.json
 
