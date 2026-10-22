@@ -1,0 +1,9 @@
+# Kept local, not published: the product spec, release zips, and the old standalone marketplace
+# (CTS installs from the claude-skills marketplace, which points at this repo).
+CTS.md
+cts-*.zip
+.claude-plugin/marketplace.json
+
+# Recorded data when CTS runs on its own folder.
+.cts/
+node_modules/
