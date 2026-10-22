@@ -114,6 +114,7 @@ async function loadState() {
   const st = await api('/api/state');
   S.moments = new Map(st.moments.map((m) => [m.id, m]));
   S.threads = new Map(st.threads.map((t) => [t.id, t]));
+  S.warm = new Map((st.warm || []).map((w) => [w.id, w]));
   S.arcs = st.arcs; S.sessions = st.sessions; S.header = st.header; S.summary = st.summary; S.threshold = st.threshold; S.root = st.root;
   $('#proj').textContent = '· ' + st.root;
   document.title = `CTS — ${st.root}`;
@@ -154,6 +155,8 @@ function connect() {
     const b = JSON.parse(ev.data);
     for (const m of b.moments) S.moments.set(m.id, m);
     for (const t of b.threads) S.threads.set(t.id, t);
+    for (const w of b.warm || []) (S.warm ||= new Map()).set(w.id, w);
+    for (const id of b.gone || []) S.warm && S.warm.delete(id);
     for (const s of b.sessions) { const i = S.sessions.findIndex((x) => x.sid === s.sid); if (i >= 0) S.sessions[i] = s; else S.sessions.push(s); }
     S.sessions.sort((a, b) => a.start - b.start);
     if (b.arcs) S.arcs = b.arcs;
@@ -177,6 +180,13 @@ function passMoment(m) {
   if (F.to && m.t0 > F.to) return false;
   if (F.q) { const q = F.q.toLowerCase(); if (!(m.headline + ' ' + m.body.join(' ') + ' ' + JSON.stringify(m.evidence)).toLowerCase().includes(q)) return false; }
   return true;
+}
+/** Near-misses follow the kind they would become, the lanes, time and search filters; the score slider does not apply. */
+function passWarm(w) {
+  if (F.kinds.size && !F.kinds.has(w.of)) return false;
+  if (w.actors.length && w.actors.every((a) => F.hide.has(laneId(w.sid, a)))) return false;
+  if ((F.from && w.t1 < F.from) || (F.to && w.t0 > F.to)) return false;
+  return !F.q || w.headline.toLowerCase().includes(F.q.toLowerCase());
 }
 function passEvent(e) {
   if (F.hide.has(laneId(e.sid, e.actor))) return false;
@@ -315,6 +325,14 @@ function drawBrush() {
 }
 
 // ---------- moment card ----------
+function warmEl(w) {
+  const live = w.live && (w.of === 'wait' || Date.now() - w.t1 < 90 * 60e3);
+  const left = w.of === 'wait' ? Math.max(0, Math.ceil(w.need - (Date.now() - w.since) / 60e3)) : Math.max(0, w.need - w.attempts);
+  const tail = !live || !left ? '' : w.of === 'wait' ? ` · a moment in ${left} min` : ` · ${left} more to a moment`;
+  return h('article', { class: `card warm${live ? ' live' : ''}`, style: `--c:var(--k-${w.of})`, tabindex: -1, dataset: { id: w.id, kind: 'w' }, title: 'A near-miss: not a moment, never scored or drafted', 'aria-label': `warming up: ${w.headline}`, onclick: () => openTranscript(w.span.ids[w.span.ids.length - 1]) },
+    h('div', { class: 'hd' }, live ? 'warming up' : 'near miss', h('span', {}, '· ' + w.of), h('span', { class: 'score' }, fmtT(w.t0).slice(0, 5) + tail)),
+    h('h3', {}, w.headline));
+}
 function cardEl(m, { inline = false } = {}) {
   const glow = Math.max(0, (m.score - 40) / 60);
   const el = h('article', {
@@ -374,12 +392,17 @@ function viewLive(main, scroll) {
   const idx = new Map(lanes.map((a, i) => [a.id, i]));
   const posts = new Set([...S.events.values()].filter((e) => e.kind === 'tool.post' || e.kind === 'tool.fail').map((e) => e.d.tool_use_id));
   const moments = [...S.moments.values()].filter((m) => m.sid === sid && passMoment(m));
+  const warm = [...(S.warm || new Map()).values()].filter((w) => w.sid === sid && passWarm(w));
+  // Moments that only the score slider hides show faded, so a near-miss can still be confirmed.
+  const low = minScore() > 25 ? [...S.moments.values()].filter((m) => m.sid === sid && m.score >= 25 && m.score < minScore() && m.status === 'auto' && passMoment({ ...m, score: 100 })) : [];
   const inSpan = new Set(moments.flatMap((m) => m.span.ids));
   let evs = [...S.events.values()].filter((e) => passEvent(e) && !(e.kind === 'tool.pre' && posts.has(e.d.tool_use_id)));
   if (!F.all) evs = evs.filter((e) => inSpan.has(e.id));
   const items = [
     ...evs.map((e) => ({ t: e.t, k: 0, e })),
     ...moments.map((m) => ({ t: m.t1, k: 1, m })),
+    ...warm.map((w) => ({ t: w.t1, k: 1, m: w, warm: true })),
+    ...low.map((m) => ({ t: m.t1, k: 1, m, low: true })),
   ].sort((a, b) => a.t - b.t || a.k - b.k || ((a.e || a.m).id < (b.e || b.m).id ? -1 : 1));
   if (!items.length) {
     const all = [...S.moments.values()].filter((m) => m.sid === sid && m.status !== 'merged'), low = all.filter((m) => m.score < minScore()).length;
@@ -407,7 +430,8 @@ function viewLive(main, scroll) {
       const ls = m.actors.map((a) => laneId(sid, a)).map((a) => (idx.has(a) ? idx.get(a) : -1)).filter((x) => x >= 0);
       const lo = ls.length ? Math.min(...ls) : 0, hi = ls.length ? Math.max(...ls) : Math.min(1, lanes.length - 1);
       const isNew = S.seen.size > 0 && !S.seen.has(m.id);
-      const card = cardEl(m);
+      const card = it.warm ? warmEl(m) : cardEl(m);
+      if (it.low) card.classList.add('warm', 'low');
       if (isNew) card.classList.add('row-new');
       if (S.open && S.open.has(m.id)) card.classList.add('open');
       grid.append(h('div', { class: 'tcell', style: 'grid-column:1' }, fmtT(m.t0)), h('div', { style: `grid-column:${2 + lo} / span ${hi - lo + 1};min-width:0` }, card));

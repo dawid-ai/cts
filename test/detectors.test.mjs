@@ -31,6 +31,36 @@ test('fight: 4 red runs then green gives one moment scored 40+5n; 2 reds do not'
   const n = run((s) => { s.start(); s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.bash('npm test', { out: JEST_GREEN }); });
   assert.ok(!has(n, 'fight'));
 });
+test('near-miss: a running streak warms up live, a fix below fightMin cools it, a fight replaces it', () => {
+  const live = run((s) => { s.start(); s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.adv(1); s.bash('npm test', { ok: false, out: JEST_RED(1) }); });
+  const [w] = live.eng.listWarm();
+  assert.equal(live.eng.listWarm().length, 1);
+  assert.ok(w.live && !w.done && w.attempts === 2);
+  assert.match(w.headline, /^2 failed attempts at .* so far$/);
+  const fixed = run((s) => { s.start(); s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.bash('npm test', { out: JEST_GREEN }); });
+  const [c] = fixed.eng.listWarm();
+  assert.ok(c.done && !c.live && c.attempts === 1);
+  assert.match(c.headline, /^1 failed attempt at .*, then it passed$/);
+  assert.equal(fixed.moments.length, 0, 'a near-miss is not a moment');
+  const fight = run((s) => { s.start(); for (let i = 0; i < 3; i++) s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.bash('npm test', { out: JEST_GREEN }); });
+  assert.ok(has(fight, 'fight'));
+  assert.equal(fight.eng.listWarm().length, 0);
+  const stale = run((s) => { s.start(); s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.adv(120); s.bash('npm test', { ok: false, out: JEST_RED(1) }); });
+  const ws = stale.eng.listWarm();
+  assert.equal(ws.length, 2);
+  assert.match(ws[0].headline, /then moved on$/);
+  assert.ok(ws[1].live);
+});
+test('near-miss: a pending question is live until answered; a long wait becomes a wait moment instead', () => {
+  const q = (answer, gap) => run((s) => { s.start(); s.prompt('ship it'); const id = s.pre('AskUserQuestion', { questions: ['Which branch?'] }); if (answer) { s.adv(gap); s.post('AskUserQuestion', {}, { id }); } });
+  const [w] = q(false).eng.listWarm();
+  assert.ok(w && w.of === 'wait' && w.live);
+  assert.equal(w.headline, 'Waiting on Which branch?');
+  assert.equal(q(true, 2).eng.listWarm().length, 0);
+  const long = q(true, 45);
+  assert.equal(long.eng.listWarm().length, 0);
+  assert.ok(has(long, 'wait'));
+});
 test('fight score caps at 90 and also fires on repeated edit failures', () => {
   const r = run((s) => {
     s.start();
@@ -155,6 +185,10 @@ test('quoted hedge words and abbreviations do not open threads', async () => {
   assert.equal(hedgeSentence('Do not register hooks e.g. the "for now" kind.'), null);
   assert.match(hedgeSentence('Done. We store it in memory for now, and will revisit later. Next.'), /^We store it in memory for now/);
   assert.equal(hedgeSentence('Fine. TODO'), null);
+  assert.equal(hedgeSentence('I need to see it live to be good enough to pickup interesting stuff from a session.'), null);
+  assert.equal(hedgeSentence('The first draft is not good enough for anyone to read.'), null);
+  assert.match(hedgeSentence('Leave the parser as it is, it is good enough for now.'), /good enough for now/);
+  assert.match(hedgeSentence("Skip the cache, that's good enough."), /good enough/);
 });
 
 test('real-project regressions: a command that only mentions deploy is not a ship; a deploy segment is', () => {

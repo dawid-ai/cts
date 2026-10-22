@@ -35,6 +35,7 @@ export class Engine {
     this.moments = new Map();
     this.drafts = new DraftStore(cfg.drafts || {});
     this.threads = new Map();
+    this.warm = new Map();       // near-misses: failure streaks still running or fixed below fightMin; never scored or drafted
     this.sessions = new Map();
     this.dismissals = {};
     this.eventCount = 0;
@@ -61,6 +62,20 @@ export class Engine {
   view(m) { return { ...m, score: this.score(m) }; }
   listMoments({ min = 0, kinds = null } = {}) {
     return [...this.moments.values()].map((m) => this.view(m)).filter((m) => m.score >= min && (!kinds || kinds.includes(m.kind))).sort((a, b) => a.t0 - b.t0);
+  }
+  /** Near-misses; `live` while the streak is still the session's current one, the session is open and the 90-minute window has not passed. */
+  listWarm() {
+    const live = (w, S = this.sessions.get(w.sid)) => !w.done && !!S && !S.ended && this.lastTs - w.t1 < 90 * MIN && (S.fails.get(w.key) || [])[0]?.id === w.span.first;
+    const waits = [...this.sessions.values()].map((S) => this.waitWarm(S)).filter(Boolean);
+    return [...[...this.warm.values()].map((w) => ({ ...w, live: live(w) })), ...waits].sort((a, b) => a.t1 - b.t1);
+  }
+  /** Claude blocked on you right now (a question, a permission or an MCP prompt is the session's newest event); past waitMinutes it becomes a `wait` moment. */
+  waitWarm(S) {
+    const w = S.waitMark;
+    if (!w || S.ended || w.t !== S.end) return null;
+    const ev = w.ev, th = this.threads.get(ev.id);
+    const what = ev.kind === 'permission.request' ? `permission for ${ev.d.tool || 'a tool'}` : ev.kind === 'elicitation' ? 'an MCP prompt' : th ? trunc(th.text, 80) : 'your answer';
+    return { id: `${ev.id}.warm`, of: 'wait', sid: S.sid, headline: `Waiting on ${what}`, done: false, live: true, since: w.t, need: this.cfg.detectors.waitMinutes, t0: w.t, t1: w.t, actors: [ev.actor], span: { first: ev.id, ids: [ev.id] }, demo: S.demo };
   }
   openThreads() { return [...this.threads.values()].filter((t) => !t.closed).sort((a, b) => b.opened_t - a.opened_t); }
   /** Moments over the threshold per subagent, keyed by agent id, for the subagent status line (read from context.json). */
@@ -106,7 +121,7 @@ export class Engine {
   }
 
   push(ev) {
-    const ch = { moments: new Set(), threads: new Set(), sessions: new Set(), drafts: new Set() };
+    const ch = { moments: new Set(), threads: new Set(), sessions: new Set(), drafts: new Set(), warm: new Set() };
     this._ch = ch;
     this._arcs = null;
     const t = Date.parse(ev.ts);
@@ -156,6 +171,9 @@ export class Engine {
       case 'thread.close': this.onThreadClose(S, ev, t); break;
       default: break;
     }
+    if (ev.kind === 'session.end') for (const w of this.warm.values()) if (w.sid === S.sid && !w.done) ch.warm.add(w.id);
+    const wk = this.waitWarm(S)?.id || null;
+    if (wk !== (S.wk || null)) { if (S.wk) ch.warm.add(S.wk); if (wk) ch.warm.add(wk); S.wk = wk; }
     this._ch = null;
     return ch;
   }
@@ -290,14 +308,17 @@ export class Engine {
       S.stats.fails++;
       const arr = S.fails.get(key) || [];
       const fresh = arr.filter((e) => t - e._t < 90 * MIN);
+      if (arr.length && fresh[0] !== arr[0]) this.unwarm(arr[0], key);
       fresh.push(ev);
       S.fails.set(key, fresh);
+      if (tst || fresh.length > 1) this.warmUp(S, fresh, key, `${fresh.length} failed attempt${fresh.length === 1 ? '' : 's'} at ${trunc(this.label4(key), 60)} so far`);
     } else {
       const arr = S.fails.get(key);
       if (arr && arr.length) {
         S.stats.attempts += arr.length;
         if (tst) S.stats.redGreen++;
-        if (arr.length >= this.cfg.detectors.fightMin) this.fightMoment(S, ev, arr, key, t, dur);
+        if (arr.length >= this.cfg.detectors.fightMin) { this.fightMoment(S, ev, arr, key, t, dur); this.unwarm(arr[0], key, true); }
+        else this.warmUp(S, [...arr, ev], key, `${arr.length} failed attempt${arr.length === 1 ? '' : 's'} at ${trunc(this.label4(key), 60)}, then it passed`, true);
         S.fails.delete(key);
       }
     }
@@ -306,9 +327,26 @@ export class Engine {
     if (d.tool === 'Bash' && !fail) this.onBash(S, ev, t);
   }
 
+  label4(key) { return key.replace(/^(test|bash):/, '').replace(/^[^:]+:(?=[^ ])/, '') || key; }
+  /** A near-miss, keyed by the streak's first failure. Replaying the same events rebuilds the same entries. */
+  warmUp(S, evs, key, headline, done = false) {
+    const first = evs[0], last = evs[evs.length - 1], id = `${first.id}.warm`;
+    this.warm.delete(id);
+    this.warm.set(id, { id, of: 'fight', sid: S.sid, key, headline, done, attempts: evs.length - (done ? 1 : 0), need: this.cfg.detectors.fightMin, t0: first._t, t1: last._t, actors: [...new Set(evs.map((e) => e.actor))], span: { first: first.id, ids: evs.map((e) => e.id).slice(0, 40) }, demo: S.demo });
+    if (this.warm.size > 300) this.warm.delete(this.warm.keys().next().value);
+    this._ch.warm.add(id);
+  }
+  /** The streak became a moment, or aged out of the 90-minute window without a fix. */
+  unwarm(first, key, promoted = false) {
+    const id = `${first.id}.warm`, w = this.warm.get(id);
+    if (!w || w.key !== key) return;
+    this._ch.warm.add(id);
+    if (promoted) this.warm.delete(id);
+    else if (!w.done) { w.done = true; w.headline = w.headline.replace(/ so far$/, ', then moved on'); }
+  }
   fightMoment(S, ev, arr, key, t) {
     const n = arr.length;
-    const label = key.replace(/^(test|bash):/, '').replace(/^[^:]+:(?=[^ ])/, '') || key;
+    const label = this.label4(key);
     const last = arr[arr.length - 1];
     const mins = Math.max(1, Math.round((t - arr[0]._t) / MIN));
     const file = (ev.d.input && (ev.d.input.file_path || ev.d.input.path)) || null;
@@ -659,7 +697,7 @@ export class Engine {
     return JSON.parse(JSON.stringify({
       v: 1, at, sids: [...all], sessions: sess, moments: [...this.moments.values()], threads: [...this.threads.values()],
       dismissals: this.dismissals, tags: [...(this.tags || new Map())], receipts: this.receipts || [], lastExtract: this.lastExtract || null, lastAuto: this.lastAuto || null,
-      failHist: [...(this.failHist || new Map())],
+      failHist: [...(this.failHist || new Map())], warm: [...this.warm.values()].filter((w) => all.has(w.sid)),
     }));
   }
   /** Load a snapshot before replaying the log (Project.init does this). */
@@ -673,6 +711,7 @@ export class Engine {
     if (snap.lastExtract) this.lastExtract = snap.lastExtract;
     if (snap.lastAuto) this.lastAuto = snap.lastAuto;
     if (snap.failHist) this.failHist = new Map(snap.failHist);
+    for (const w of snap.warm || []) this.warm.set(w.id, w);
     for (const x of snap.sessions) {
       const S = this.S(x.sid);
       Object.assign(S, { start: x.start, end: x.end, parent: x.parent, source: x.source, model: x.model, title: x.title, demo: x.demo, headless: x.headless || null, events: x.events, ended: x.ended, branch: x.branch, stats: x.stats, status: x.status || {} });

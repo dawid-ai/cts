@@ -74,7 +74,7 @@ export class Project {
         if (!files.has(f) || size < off) {
           this.reindex();
           const e = this.engine;
-          return { events: [], reset: true, ch: { moments: new Set(e.moments.keys()), threads: new Set(e.threads.keys()), sessions: new Set(e.sessions.keys()), drafts: new Set(e.drafts.drafts.keys()) } };
+          return { events: [], reset: true, ch: { moments: new Set(e.moments.keys()), threads: new Set(e.threads.keys()), sessions: new Set(e.sessions.keys()), drafts: new Set(e.drafts.drafts.keys()), warm: new Set(e.warm.keys()) } };
         }
       }
     }
@@ -85,7 +85,7 @@ export class Project {
       const it = readEvents(path.join(this.p.sessions, f), from);
       heads.push({ f, it, cur: null });
     }
-    if (!heads.length) return { events: [], ch: { moments: new Set(), threads: new Set(), sessions: new Set() } };
+    if (!heads.length) return { events: [], ch: { moments: new Set(), threads: new Set(), sessions: new Set(), drafts: new Set(), warm: new Set() } };
     const advance = (h) => {
       for (;;) {
         const n = h.it.next();
@@ -98,7 +98,7 @@ export class Project {
       }
     };
     for (const h of heads) advance(h);
-    const ch = { moments: new Set(), threads: new Set(), sessions: new Set(), drafts: new Set() };
+    const ch = { moments: new Set(), threads: new Set(), sessions: new Set(), drafts: new Set(), warm: new Set() };
     const fresh = [];
     let count = 0;
     this.db.exec('BEGIN');

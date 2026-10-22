@@ -145,7 +145,7 @@ export const DEP_REMOVE_RE = /\b(?:(?:npm|pnpm|yarn|bun)\s+(?:uninstall|remove|r
 export const DEP_ADD_RE = /\b(?:(?:npm|pnpm|bun)\s+(?:install|add|i)|yarn\s+add|pip3?\s+install|cargo\s+add|poetry\s+add|go\s+get)\b\s*(.*)/;
 export const RM_RE = /\b(?:git\s+rm|rm)\s+(?:-[a-zA-Z]+\s+)*([^;&|\n]+)/;
 
-export const HEDGE_RE = /\b(for now|temporar(?:y|ily)|TODO|revisit|good enough|quick hack|placeholder|come back to|not sure yet|punt(?:ing)?|for the time being)\b/i;
+export const HEDGE_RE = /\b(for now|temporar(?:y|ily)|TODO|revisit|(?<!\b(?:be|not|n't) )good enough(?!\s+to\b)|quick hack|placeholder|come back to|not sure yet|punt(?:ing)?|for the time being)\b/i;
 export const DECISIVE_RE = /\b(decid(?:ed|e)|let'?s (?:go|use|keep|do)|go(?:ing)? with|final(?:ly)?|settled|resolved|permanent(?:ly)?|make it (?:real|permanent|proper)|not temporary|keep it)\b/i;
 
 /** Sentence containing the hedge (<=200 chars), or null. Hedge words that are quoted or in code spans are discussion, not decisions. */

@@ -217,6 +217,8 @@ test('cts watch --once renders the companion pane without a server; the renderer
     moments: [{ id: 'm', kind: 'fight', score: 70, headline: 'x'.repeat(200), t1: Date.now() - 60000 }] };
   const lines = renderCompanion(d, { width: 40, color: false, port: 4848 });
   assert.ok(lines.every((l) => l.length <= 40), 'fits'); assert.match(lines[0], /PAUSED/); assert.match(lines[1], /2 drafts to review/); assert.match(lines.at(-1), /localhost:4848/);
+  const warm = renderCompanion({ ...d, warm: [{ of: 'fight', headline: '2 failed attempts at npm test so far', t0: Date.now() - 60000 }] }, { width: 60, color: false }).join('\n');
+  assert.match(warm, /Warming up\n {2}~ 2 failed attempts at npm test so far/);
 });
 
 test('init --statusline: project or --global, keeps a foreign status line unless --force; the cache command survives updates', async () => {

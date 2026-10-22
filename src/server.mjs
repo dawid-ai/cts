@@ -35,9 +35,10 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
   const clients = new Set();
   let lastActivity = Date.now();
   const state = () => ({
-    summary: pr.summary(), header: pr.engine.header(), sessions: pr.engine.sessionList(), moments: pr.engine.listMoments(), threads: [...pr.engine.threads.values()],
+    summary: pr.summary(), header: pr.engine.header(), sessions: pr.engine.sessionList(), moments: pr.engine.listMoments(), threads: [...pr.engine.threads.values()], warm: pr.engine.listWarm(),
     arcs: pr.engine.arcs(), threshold: pr.cfg.threshold, root: path.basename(root), now: Date.now(), kinds: Object.keys(pr.engine.cfg.detectors.weights).length ? undefined : undefined,
   });
+  const warmDiff = (ids) => { const all = ids.size ? pr.engine.listWarm() : [], now = new Set(all.map((w) => w.id)); return { warm: all.filter((w) => ids.has(w.id)), gone: [...ids].filter((id) => !now.has(id)) }; };
   const send = (res, event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   const broadcast = (event, data) => { for (const c of clients) { try { send(c, event, data); } catch { clients.delete(c); } } };
 
@@ -85,13 +86,14 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         sentVersion = pr.engine.drafts.version;
         if (clients.size) broadcast('drafts', draftsPayload());
       }
-      if (!events.length && !ch.moments.size) return;
+      if (!events.length && !ch.moments.size && !ch.warm.size) return;
       lastActivity = Date.now();
       if (clients.size) {
         broadcast('batch', {
           events: events.map(slim),
           moments: [...ch.moments].map((id) => pr.engine.moments.get(id)).filter(Boolean).map((m) => pr.engine.view(m)),
           threads: [...ch.threads].map((id) => pr.engine.threads.get(id)).filter(Boolean),
+          ...warmDiff(ch.warm),
           sessions: pr.engine.sessionList().filter((s) => ch.sessions.has(s.sid)),
           arcs: ch.moments.size ? pr.engine.arcs() : undefined,
           header: pr.engine.header(), summary: pr.summary(),

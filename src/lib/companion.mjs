@@ -1,4 +1,4 @@
-// The terminal companion (`cts watch`): last five moments, open threads, drafts waiting, and what each actor is doing,
+// The terminal companion (`cts watch`): last five moments, open threads, live near-misses, drafts waiting, and what each actor is doing,
 // sized for a narrow split pane next to Claude Code. Pure: data in, lines out.
 import { trunc, ago } from './util.mjs';
 
@@ -10,6 +10,7 @@ export function companionData(pr, now = Date.now()) {
     root: pr.root, now, summary: pr.summary(), header: e.header(), pending: e.drafts.pendingCount(),
     moments: ms.slice(-5).reverse().map((m) => ({ id: m.id, kind: m.kind, score: m.score, headline: m.headline, t1: m.t1, status: m.status })),
     threads: e.openThreads().slice(0, 3).map((t) => ({ id: t.id, text: t.text, opened_t: t.opened_t })),
+    warm: e.listWarm().filter((w) => w.live).slice(-3).map((w) => ({ of: w.of, headline: w.headline, t0: w.t0 })),
   };
 }
 
@@ -34,6 +35,10 @@ export function renderCompanion(d, { width = 48, color = true, port = null } = {
   if (d.threads.length) {
     out.push('', `${c.bold}Open${c.off}`);
     for (const t of d.threads) out.push(line(`  ? ${t.text}`) + `${c.dim} ${ago(d.now - t.opened_t)}${c.off}`);
+  }
+  if (d.warm && d.warm.length) {
+    out.push('', `${c.bold}Warming up${c.off}`);
+    for (const x of d.warm) out.push(line(`  ~ ${x.headline}`) + `${c.dim} ${ago(d.now - x.t0)}${c.off}`);
   }
   const h = d.header;
   if (h && !h.ended) {

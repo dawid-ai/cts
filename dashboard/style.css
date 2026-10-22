@@ -83,6 +83,7 @@ h2.sec{font-size:.78rem;text-transform:uppercase;letter-spacing:.1em;color:var(-
 .card .ev{display:inline-block;margin-top:6px;font:.75rem var(--mono);padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--sunk)}
 .card .more{display:none;margin-top:8px;border-top:1px dashed var(--line2);padding-top:8px;font-size:.82rem}
 .card.open .more{display:block}
+.card.warm{opacity:.55;border-style:dashed;border-left-width:3px;padding:4px 12px 6px;cursor:pointer}.card.warm h3{font-size:.86rem;font-weight:500}.card.warm.live{opacity:.8}.card.warm.low:hover,.card.warm.open{opacity:1}.card.warm.live .hd::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--c);animation:pulse 1.4s ease-in-out infinite}
 .card.st-dismissed{opacity:.45;border-style:dashed}.card.st-confirmed .hd::after{content:"✓ confirmed";margin-left:6px;color:var(--ok)}
 .card .acts{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
 .btn{border:1px solid var(--line2);background:var(--surface);border-radius:8px;padding:3px 10px;font-size:.8rem}.btn:hover{background:var(--sunk)}
