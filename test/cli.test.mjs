@@ -218,3 +218,24 @@ test('cts watch --once renders the companion pane without a server; the renderer
   const lines = renderCompanion(d, { width: 40, color: false, port: 4848 });
   assert.ok(lines.every((l) => l.length <= 40), 'fits'); assert.match(lines[0], /PAUSED/); assert.match(lines[1], /2 drafts to review/); assert.match(lines.at(-1), /localhost:4848/);
 });
+
+test('init --statusline: project or --global, keeps a foreign status line unless --force; the cache command survives updates', async () => {
+  const { statusCommand } = await import('../src/lib/statusline.mjs');
+  const root = proj(), home = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-claude-'));
+  const run = (...a) => spawnSync(process.execPath, [CTS, 'init', ...a], { cwd: root, encoding: 'utf8', env: { ...process.env, CTS_NO_SERVER: '1', CLAUDE_CONFIG_DIR: home } });
+  const local = path.join(root, '.claude', 'settings.local.json'), global = path.join(home, 'settings.json');
+  assert.match(run('--statusline').stdout, /enabled in \.claude\/settings\.local\.json/);
+  assert.match(readJson(local).statusLine.command, /cts" statusline$/);
+  fs.writeFileSync(global, JSON.stringify({ theme: 'dark', statusLine: { type: 'command', command: 'my-line' } }));
+  assert.match(run('--statusline', '--global').stdout, /kept the existing status line/);
+  assert.equal(readJson(global).statusLine.command, 'my-line');
+  assert.match(run('--statusline', '--global', '--force').stdout, /every project/);
+  assert.equal(readJson(global).theme, 'dark');
+  assert.match(readJson(global).statusLine.command, /statusline/);
+  const cmd = statusCommand(path.join(home, 'plugins', 'cache', 'mk', 'cts', '0.2.0', 'bin', 'cts'));
+  assert.doesNotMatch(cmd, /0\.2\.0/);
+  if (process.platform !== 'win32') {
+    for (const v of ['0.2.0', '0.10.1']) { const b = path.join(home, 'plugins', 'cache', 'mk', 'cts', v, 'bin'); fs.mkdirSync(b, { recursive: true }); fs.writeFileSync(path.join(b, 'cts'), `console.log('v${v}', process.argv[2])`); }
+    assert.equal(spawnSync('sh', ['-c', cmd], { encoding: 'utf8' }).stdout, 'v0.10.1 statusline\n');
+  }
+});

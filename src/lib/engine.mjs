@@ -1,10 +1,10 @@
 // The signal layer, Tier 1: deterministic detectors, threads, sessions and arcs.
 // Pure and replayable: feed it the same ordered events and you get the same moments (that is what `cts reindex` relies on).
-import { testSegment, testVerdict, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf } from './parse.mjs';
+import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf } from './parse.mjs';
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
-export const BASE = { reversal: 60, fight: 40, disagreement: 70, shipped: 65, broke: 65, pivot: 55, 'memory-cut': 50, refusal: 50, wait: 20, escalation: 45, mark: 100, theory: 50, workaround: 50, learned: 50 };
+export const BASE = { reversal: 60, fight: 40, disagreement: 70, shipped: 65, broke: 65, pivot: 55, 'memory-cut': 50, refusal: 50, wait: 20, escalation: 45, mark: 100, misread: 55, frustration: 45, recurring: 55, theory: 50, workaround: 50, learned: 50 };
 export const TIER2_KINDS = ['theory', 'workaround', 'learned'];
 export const KINDS = Object.keys(BASE);
 const MIN = 60000;
@@ -13,6 +13,10 @@ const HUMAN = new Set(['mark', 'confirm', 'dismiss', 'rescore', 'merge', 'thread
 
 const REFUSAL_LEAD = /^\s*(?:no[,.!\s]+(?:don'?t|do not|stop|not)|don'?t|do not|stop\b|i don'?t want|not that|never mind)/i;
 const REVERSAL_LEAD = /^\s*(?:wait\b|no\b|nope\b|actually\b|go back|that'?s wrong|that is wrong|revert|undo|scratch that|hold on|hang on)/i;
+// You correcting how your request was read ("I meant ...") and losing patience, in your own words (quotes and code removed).
+const MISREAD_LEAD = /^\s*(?:(?:no|nope|sorry|hm+|ok(?:ay)?|well)[,.!\s]+)?(?:i meant\b|what i meant\b|i was asking\b|my question (?:was|is)\b|i'?m asking (?:about|whether|if)\b|(?:that'?s |that is )?not what i (?:asked|meant|said|wanted)\b|you (?:misunderstood|misread|got me wrong)\b|i didn'?t (?:ask|mean|say)\b)/i;
+const FRUSTRATION = /\b(?:damn(?:ed|it)?|wtf|ffs|fuck\w*|shit\w*|crap|ugh+|argh+|jeez|come on)\b|\b(?:still|again)\b[^.?!\n]{0,30}\b(?:broken|failing|fails|wrong|not work\w*|doesn'?t work|does not work|same (?:error|problem|issue))\b|\b(?:doesn'?t|does not|didn'?t|still not) work(?:ing)?\b|\bnot working\b|\bwhy (?:is|does|do) (?:it|this|that) (?:still|keep)\b|\bkeeps? (?:failing|breaking|happening)\b|\?!|!{3,}/i;
+const ownWords = (t) => String(t || '').replace(/<(pasted_content|system-reminder)\b[\s\S]*?<\/\1>/g, ' ').replace(/```[\s\S]*?(?:```|$)/g, ' ').replace(/`[^`\n]*`/g, ' ').replace(/^>.*$/gm, ' ').replace(/"[^"\n]*"|“[^”\n]*”/g, ' ').slice(0, 600);
 const POS = /\b(done|complete[d]?|implemented|ready|all set|finished|looks good|lgtm|approved?|passes|passing|shipped)\b/i;
 const NEG = /\b(missing|rejected?|not (?:done|implemented|complete|working|handled)|incorrect|wrong|broken|blocker|fails?|failing|does(?:n'?t| not) (?:work|handle|cover|meet)|needs? (?:work|fix|changes)|do(?:es)? not pass)\b/i;
 const rank = (m) => (/opus|fable|mythos/i.test(m || '') ? 3 : /sonnet/i.test(m || '') ? 2 : /haiku/i.test(m || '') ? 1 : 0);
@@ -215,10 +219,17 @@ export class Engine {
     // A program's prompt (`claude -p`): no refusals, reversals or threads on your behalf.
     if (ev.actor === 'caller') { S.headless ||= ev.d.headless || 'sdk'; this.setStatus(S, 'main', 'thinking', 'reading the prompt'); return; }
     this.setStatus(S, 'main', 'thinking', 'reading your prompt');
-    if (REFUSAL_LEAD.test(text)) {
+    const own = ownWords(text), mad = FRUSTRATION.test(own);
+    // A correction right after a confident "done" weighs more: the answer sounded finished and was not what you asked.
+    const prev = [...S.msgs].reverse().find((o) => o.actor === 'main'), sure = !!prev && prev.pos && !prev.neg && t - prev.t <= 30 * MIN;
+    if (MISREAD_LEAD.test(own)) {
+      this.emit(S, 'misread', [ev], { base: BASE.misread + (sure ? 10 : 0) + (mad ? 5 : 0), actors: ['human'], headline: `You clarified what you meant: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure, frustrated: mad }, who: ev.d.who });
+    } else if (REFUSAL_LEAD.test(text)) {
       this.emit(S, 'refusal', [ev], { actors: ['human'], headline: `You said no: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600) }, who: ev.d.who });
     } else if (REVERSAL_LEAD.test(text)) {
       this.emit(S, 'reversal', [ev], { actors: ['human'], headline: `You pulled back: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600) }, who: ev.d.who });
+    } else if (mad) {
+      this.emit(S, 'frustration', [ev], { base: BASE.frustration + (sure ? 10 : 0), actors: ['human'], headline: `You were losing patience: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure }, who: ev.d.who });
     }
     this.hedgeFrom(S, ev, t, text);
     if (DECISIVE_RE.test(text)) this.closeByTopics(S, ev, t, topicsOf(text), 'decision');
@@ -237,13 +248,14 @@ export class Engine {
     }
   }
 
-  /** The test run in a Bash event. Events captured before `seg` existed are re-classified from the stored command. */
+  /** The test run in a Bash event. Events captured before `seg` existed, or with no verdict, are re-classified from the stored command and output. */
   testOf(ev) {
     const d = ev.d;
     if (d.tool !== 'Bash' || !d.test) return null;
-    if (d.test.seg) return d.test;
-    const ts = testSegment(d.input && d.input.command);
-    return ts && { ...d.test, ...ts, red: testVerdict(ts, d.test, d.out, ev.kind !== 'tool.fail') };
+    if (d.test.seg && d.test.red != null) return d.test;
+    const ts = d.test.seg ? d.test : testSegment(d.input && d.input.command);
+    const c = d.test.total ? d.test : parseCounts(d.out);
+    return ts && { ...d.test, ...ts, ...(c || {}), red: testVerdict(ts, c, d.out, ev.kind !== 'tool.fail') };
   }
 
   failKey(ev, tst) {
@@ -311,6 +323,7 @@ export class Engine {
 
   onTest(S, ev, tst, key, red, t) {
     if (!red) { S.lastGreen.set(key, { ev, total: tst.total || 0 }); return; }
+    this.recurCheck(S, ev, t);
     const g = S.lastGreen.get(key);
     if (!g) return;
     S.lastGreen.delete(key);
@@ -320,6 +333,28 @@ export class Engine {
       headline: `Tests went red: ${trunc(tst.seg, 60)}`,
       body: [tst.total ? `${tst.fail} of ${tst.total} failing after a green run ${Math.round((t - g.ev._t) / MIN)} min earlier.` : 'Green to red.'],
       evidence: { error: trunc(ev.d.out, 500), counts: { runner: tst.runner, pass: tst.pass, fail: tst.fail, total: tst.total }, since_green_ms: t - g.ev._t },
+    });
+  }
+
+  /** The same failing test in an earlier session: a problem that keeps coming back. One moment per session per test. */
+  recurCheck(S, ev, t) {
+    const names = failedTests(ev.d.out);
+    if (!names.length) return;
+    const hist = (this.failHist ||= new Map()), hits = [];
+    let n = 0, first = t;
+    for (const name of names) {
+      const sig = (S.demo ? 'demo:' : '') + name, seen = hist.get(sig) || {};
+      const before = Object.entries(seen).filter(([sid, t0]) => sid !== S.sid && t0 < t);
+      if (before.length && !(S.recur ||= new Set()).has(sig)) { S.recur.add(sig); hits.push(name); n = Math.max(n, before.length); first = Math.min(first, ...before.map(([, t0]) => t0)); }
+      if (!(S.sid in seen)) { seen[S.sid] = t; hist.delete(sig); hist.set(sig, seen); }
+      if (hist.size > 2000) hist.delete(hist.keys().next().value);
+    }
+    if (!hits.length) return;
+    this.emit(S, 'recurring', [ev], {
+      base: Math.min(85, BASE.recurring + 10 * (n - 1)),
+      headline: `Failing again: ${trunc(hits[0], 70)}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}, also in ${n} earlier session${n === 1 ? '' : 's'}`,
+      body: [`${hits.length === 1 ? 'This test' : 'These tests'} failed in ${n} earlier session${n === 1 ? '' : 's'}, first ${Math.max(1, Math.round((t - first) / DAY))} day(s) ago.`],
+      evidence: { tests: hits, sessions: n, since_first_ms: t - first, error: trunc(ev.d.out, 500) },
     });
   }
 
@@ -624,6 +659,7 @@ export class Engine {
     return JSON.parse(JSON.stringify({
       v: 1, at, sids: [...all], sessions: sess, moments: [...this.moments.values()], threads: [...this.threads.values()],
       dismissals: this.dismissals, tags: [...(this.tags || new Map())], receipts: this.receipts || [], lastExtract: this.lastExtract || null, lastAuto: this.lastAuto || null,
+      failHist: [...(this.failHist || new Map())],
     }));
   }
   /** Load a snapshot before replaying the log (Project.init does this). */
@@ -636,6 +672,7 @@ export class Engine {
     if (snap.receipts.length) this.receipts = snap.receipts;
     if (snap.lastExtract) this.lastExtract = snap.lastExtract;
     if (snap.lastAuto) this.lastAuto = snap.lastAuto;
+    if (snap.failHist) this.failHist = new Map(snap.failHist);
     for (const x of snap.sessions) {
       const S = this.S(x.sid);
       Object.assign(S, { start: x.start, end: x.end, parent: x.parent, source: x.source, model: x.model, title: x.title, demo: x.demo, headless: x.headless || null, events: x.events, ended: x.ended, branch: x.branch, stats: x.stats, status: x.status || {} });
@@ -681,7 +718,7 @@ export class Engine {
       const kinds = new Set(list.map((m) => m.kind));
       const lastShip = [...list].reverse().find((m) => m.kind === 'shipped');
       const outcome = lastShip && lastShip === list[list.length - 1] ? lastShip : lastShip || null;
-      const struggle = list.some((m) => ['fight', 'broke', 'refusal', 'reversal', 'memory-cut', 'escalation'].includes(m.kind));
+      const struggle = list.some((m) => ['fight', 'broke', 'refusal', 'reversal', 'memory-cut', 'escalation', 'misread', 'frustration', 'recurring'].includes(m.kind));
       const days = (list[list.length - 1].t1 - list[0].t0) / DAY;
       const agentActors = new Set(list.flatMap((m) => m.actors).filter((a) => a.startsWith('agent:')));
       let shape;

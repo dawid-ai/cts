@@ -206,3 +206,14 @@ test('a prompt in a headless session (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`) is attri
   assert.equal(p.actor, 'caller'); assert.equal(p.d.who, undefined);
   assert.equal(q.actor, 'human'); assert.ok(q.d.who, 'interactive surfaces other than the CLI are still you');
 });
+
+test('SessionStart tips about the status line once, and only when none is set', () => {
+  const root = proj(), home = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-home-')), claude = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-claude-'));
+  const env = { CTS_HOME: home, CLAUDE_CONFIG_DIR: claude };
+  const msg = () => { const o = fire(root, { hook_event_name: 'SessionStart', source: 'startup' }, env).stdout; return o ? JSON.parse(o).systemMessage : undefined; };
+  fs.writeFileSync(path.join(claude, 'settings.json'), JSON.stringify({ statusLine: { type: 'command', command: 'x' } }));
+  assert.equal(msg(), undefined);
+  fs.writeFileSync(path.join(claude, 'settings.json'), '{}');
+  assert.match(msg(), /\/cts:init --statusline --global/);
+  assert.equal(msg(), undefined, 'shown once');
+});

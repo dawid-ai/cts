@@ -219,3 +219,55 @@ test('real-project regressions: only a runner at the start of a segment is a tes
   assert.equal(testInfo('npx vitest run 2>&1 | tail -3', 'Tests  9 passed (9)', false).red, false, 'counts win over the exit code');
   assert.equal(testInfo('npx vitest run', '', false).red, true, 'the runner alone: its exit code counts');
 });
+
+const NODE_RED = '  ✖ refills tokens (3ms)\n    code: \'ERR_ASSERTION\',\n    expected: 5,';
+test('test verdicts read the runner output: node spec counts, and failure lines after `| tail`', () => {
+  assert.deepEqual(testInfo('npm test', 'ℹ tests 3\nℹ pass 2\nℹ fail 1', true).fail, 1);
+  assert.equal(testInfo('npm test 2>&1 | tail -15', NODE_RED, true).red, true);
+  assert.equal(testInfo('npm test 2>&1 | tail -3', 'ℹ pass 3\nℹ fail 0', true).red, false);
+  assert.equal(testInfo('npm test | tail', 'done', true).red, null, 'nothing tells: unknown');
+  const old = { kind: 'tool.post', d: { tool: 'Bash', input: { command: 'npm test | tail' }, out: NODE_RED, test: { runner: 'npm-test', seg: 'npm test', last: false, red: null } } };
+  assert.equal(run(() => {}).eng.testOf(old).red, true, 'reindex re-reads events captured with no verdict');
+});
+
+test('misread: "I meant ..." fires, scored higher right after a confident answer; ordinary prompts do not', () => {
+  const r = run((s) => { s.start(); s.prompt('make the status line on by default'); s.stop('Done: it is now enabled for every project.'); s.prompt('I meant if this can be on by default for the plugin?'); });
+  const m = r.moments.find((x) => x.kind === 'misread');
+  assert.ok(m && m.evidence.after_confident);
+  assert.equal(m.score, 65);
+  assert.equal(run((s) => { s.start(); s.prompt('no, I meant the other file'); }).moments.find((x) => x.kind === 'misread').score, 55);
+  for (const p of ['what did you mean by arcs?', 'add a test that "I meant" is handled', 'rename meantime to interim']) assert.ok(!has(run((s) => { s.start(); s.prompt(p); }), 'misread'), p);
+});
+
+test('frustration fires on your own words, not on pasted logs, code or quotes', () => {
+  assert.ok(has(run((s) => { s.start(); s.prompt('it doesn\'t show anything. This means it doesn\'t work or I\'m not understanding the damn thing'); }), 'frustration'));
+  assert.ok(has(run((s) => { s.start(); s.prompt('still failing with the same error'); }), 'frustration'));
+  for (const p of ['fix the upload bug, the log says ```\nError: not working\n```', 'search the logs for "not working"', '<pasted_content id="x">ugh this still fails</pasted_content> summarise this', 'add retries to the uploader']) assert.ok(!has(run((s) => { s.start(); s.prompt(p); }), 'frustration'), p);
+  assert.ok(!has(run((s) => { s.start(); s.prompt('no, I meant the dashboard, damn'); }), 'frustration'), 'a misread that is also frustrated is one moment');
+});
+
+test('recurring: a test that failed in an earlier session fails again; one moment per session, scored by sessions', () => {
+  const r = run((s) => {
+    for (const sid of ['a', 'b', 'c']) {
+      s.sid = sid; s.start();
+      s.bash('npm test', { ok: false, out: NODE_RED }); s.adv(1);
+      s.bash('npm test', { ok: false, out: NODE_RED }); s.adv(1);
+      s.bash('npm test', { out: 'ℹ pass 3\nℹ fail 0' }); s.adv(60 * 24);
+    }
+  });
+  const rec = r.moments.filter((m) => m.kind === 'recurring');
+  assert.deepEqual(rec.map((m) => [m.sid, m.evidence.sessions, m.score]), [['b', 1, 55], ['c', 2, 65]]);
+  assert.match(rec[1].headline, /refills tokens.*2 earlier sessions/);
+  assert.ok(!has(run((s) => { s.start(); s.bash('npm test', { ok: false, out: NODE_RED }); s.bash('npm test', { ok: false, out: NODE_RED }); }), 'recurring'), 'the same session is not a recurrence');
+});
+
+test('recurring survives a retention trim: the failure history is in the snapshot', async () => {
+  const { Engine } = await import('../src/lib/engine.mjs');
+  const { sim, eng } = run((s) => {
+    for (const sid of ['a', 'b', 'c']) { s.sid = sid; s.start(); s.bash('npm test', { ok: false, out: NODE_RED }); s.adv(60 * 24); }
+  });
+  const snap = eng.snapshot(['a', 'b'], Date.parse(sim.events.find((e) => e.sid === 'c').ts) - 1);
+  const e2 = new Engine(); e2.restore(snap);
+  for (const e of sim.events.filter((x) => x.sid === 'c')) e2.push(structuredClone(e));
+  assert.equal(e2.listMoments().find((m) => m.kind === 'recurring' && m.sid === 'c').evidence.sessions, 2);
+});

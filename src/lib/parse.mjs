@@ -47,7 +47,8 @@ export function testSegment(cmd) {
   return null;
 }
 export function testRunner(cmd) { const t = testSegment(cmd); return t ? t.runner : null; }
-const FAIL_MARK = /^\s*(?:FAIL|FAILED|×|✗|✕)\s|^\s*Tests?:?\s+\d+ failed|AssertionError: expected|^--- FAIL/m;
+// A failure line survives `| tail`: node's `✖ failing tests:` and assertion details come after its summary.
+const FAIL_MARK = /^\s*(?:FAIL|FAILED|×|✗|✕|✖)\s|^\s*Tests?:?\s+\d+ failed|\bAssertionError\b|\bERR_ASSERTION\b|^--- FAIL|^not ok \d/m;
 /**
  * Red, green, or null when nothing tells: counts win, then a runner's failure line, then the exit code, but only when
  * it is the runner's own (not `| tail`, `| grep`, or a later `&& tsc`).
@@ -65,6 +66,18 @@ export function testInfo(cmd, out, ok) {
   return { ...ts, ...(c || {}), red: testVerdict(ts, c, out, ok) };
 }
 
+// One failing test per line, per runner: node spec, jest, vitest, pytest, go, cargo, rspec, TAP.
+const FAILED_TEST = [
+  /^\s*✖ (.+?) \(\d[\d.]*m?s\)\s*$/gm, /^\s*● (?!Console\b)(.+?)\s*$/gm, /^\s*(?:×|✗|FAIL)\s+(\S+\s+>\s+.+?)(?:\s+\d+m?s)?\s*$/gm,
+  /^FAILED (\S+::\S+)/gm, /^--- FAIL: (\S+)/gm, /^test (\S+) \.\.\. FAILED/gm, /^rspec (\.\/\S+:\d+)/gm, /^not ok \d+ - (.+?)\s*$/gm,
+];
+/** Names of the failing tests in runner output (at most 5), the signature that follows a failure across sessions. */
+export function failedTests(out) {
+  const names = new Set();
+  for (const re of FAILED_TEST) for (const m of String(out || '').matchAll(re)) if (!/^failing tests:?$/.test(m[1])) names.add(m[1].trim().slice(0, 120));
+  return [...names].slice(0, 5);
+}
+
 /** Pull pass/fail counts out of runner output. Returns {pass,fail,total} or null. */
 export function parseCounts(text) {
   if (!text) return null;
@@ -72,8 +85,8 @@ export function parseCounts(text) {
   let m;
   // cargo
   if ((m = /test result: (?:ok|FAILED)\. (\d+) passed; (\d+) failed/.exec(text))) return mk(num(m, 1), num(m, 2));
-  // node --test
-  const np = /^# pass (\d+)/m.exec(text), nf = /^# fail (\d+)/m.exec(text);
+  // node --test (TAP `# pass`, spec reporter `ℹ pass`)
+  const np = /^(?:#|ℹ) pass (\d+)/m.exec(text), nf = /^(?:#|ℹ) fail (\d+)/m.exec(text);
   if (np && nf) return mk(num(np, 1), num(nf, 1));
   // rspec
   if ((m = /(\d+) examples?, (\d+) failures?/.exec(text))) return mk(num(m, 1) - num(m, 2), num(m, 2));

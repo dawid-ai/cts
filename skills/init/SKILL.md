@@ -1,7 +1,7 @@
 ---
 name: init
 description: Set up CTS in this project: create .cts/, optionally load a sample session and enable the status line.
-argument-hint: "[--demo] [--statusline]"
+argument-hint: "[--demo] [--statusline [--global] [--force]]"
 disable-model-invocation: true
 allowed-tools: Bash(cts:*)
 ---

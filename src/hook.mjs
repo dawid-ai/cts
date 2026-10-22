@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { findRoot, ensureProject, paths, serialize, pidAlive, readJson, ago, loadConfig, SERVER_FLAGS } from './lib/util.mjs';
 import { normalize } from './lib/normalize.mjs';
 import { register } from './lib/registry.mjs';
+import { tip } from './lib/statusline.mjs';
 
 function readStdin() {
   const chunks = [];
@@ -75,7 +76,9 @@ try {
     startServer(root, p);
     const paused = fs.existsSync(p.paused);
     const note = paused ? null : contextNote(p);
-    const msg = paused ? null : userLine(root, p);
+    let hint = null;
+    try { hint = tip(root); } catch (e) { logFail(root, e); }
+    const msg = [paused ? null : userLine(root, p), hint].filter(Boolean).join('\n') || null;
     if (note || msg) process.stdout.write(JSON.stringify({ ...(msg ? { systemMessage: msg } : {}), ...(note ? { hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: note } } : {}) }));
   }
 } catch (e) {

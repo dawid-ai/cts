@@ -69,6 +69,9 @@ function storyLines(pr, m) {
       return ['I set the work aside and tried another path in parallel.'];
     case 'memory-cut': { const n = (E.files || []).length; return [n ? `After the context was compacted, the agent re-read ${plural(n, 'file')} it had already seen.` : 'After the context was compacted, the agent re-read files it had already seen.']; }
     case 'escalation': return ['I switched models to get unstuck.'];
+    case 'misread': return [E.after_confident ? 'The agent said it was done, but it had answered a different question than the one I asked.' : 'The agent took my request the wrong way, and I had to spell out what I actually meant.'];
+    case 'frustration': return [E.after_confident ? 'It was supposed to be done, and it still was not doing what I needed. I was losing patience.' : 'I was losing patience: it still was not doing what I needed.'];
+    case 'recurring': { const n = E.sessions; return [n ? `A test I had already fought with in ${plural(n, 'earlier session')} failed again.` : 'A test I had already fought with before failed again.']; }
     case 'wait': return [E.minutes ? `The agent sat waiting ${E.minutes} minutes for me.` : 'The agent sat waiting for me.'];
     default: return [m.note || firstPerson(h)];
   }

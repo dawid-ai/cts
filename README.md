@@ -48,7 +48,10 @@ Event schema: `docs/events.md`.
 ## Moments, threads, arcs
 
 Tier 1 detectors run deterministically as events arrive: `reversal` 60, `fight` 40+5/attempt (max 90), `disagreement` 70,
-`shipped` 65, `broke` 65, `pivot` 55, `memory-cut` 50, `refusal` 50, `wait` 20, `escalation` 45, `mark` 100.
+`shipped` 65, `broke` 65, `pivot` 55, `memory-cut` 50, `refusal` 50, `wait` 20, `escalation` 45, `mark` 100,
+`misread` 55 (you say "I meant ..."), `frustration` 45 (your own words lose patience; both +10 right after a confident
+"done"), `recurring` 55+10 per earlier session (max 85: a test that failed in an earlier session fails again).
+Test verdicts come from the runner's own output (counts, then failure lines), so `npm test | tail` still reads as red.
 Scores, the fight threshold and the main-branch globs are configurable in `.cts/cts.json`:
 
 ```json
@@ -138,7 +141,10 @@ In Claude Code they are namespaced: `/cts:mark`, `/cts:open`, `/cts:threads`, `/
 to mark during a running turn use the dashboard (`Shift+M`, or `m` on a card) or run `cts mark` from a second terminal.
 
 **Status line**: Claude Code does not let a plugin set the main status line. `cts init --statusline` writes it into
-`.claude/settings.local.json` for this project. It prints nothing when the server is down.
+`.claude/settings.local.json` for this project; `--global` writes it into `~/.claude/settings.json` for every project.
+An existing status line that isn't CTS's is kept unless you add `--force`. Installed from the plugin cache, the command
+picks the newest CTS version when it runs, so plugin updates don't break it. The first session without any status line
+shows a one-time tip. It prints nothing when the server is down.
 The plugin does set the **subagent status line** (its `settings.json`): each subagent with moments shows
 `CTS ● 2 moments: "<latest headline>"` in the agent panel; the others keep Claude Code's default row. It reads `.cts/context.json` only.
 

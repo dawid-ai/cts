@@ -15,7 +15,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
-const KINDS = ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'pivot', 'memory-cut', 'refusal', 'wait', 'escalation', 'mark', 'theory', 'workaround', 'learned'];
+const KINDS = ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'pivot', 'memory-cut', 'refusal', 'wait', 'escalation', 'misread', 'frustration', 'recurring', 'mark', 'theory', 'workaround', 'learned'];
 const STRUGGLE_NOT = new Set(['shipped']);
 const VIEWS = [['live', 'Live'], ['story', 'Story'], ['threads', 'Threads'], ['sessions', 'Sessions'], ['drafts', 'Drafts'], ['settings', 'Settings']];
 const GLYPH = { thinking: '◐', running: '▶', waiting: '⏸', done: '✓', failed: '✕' };
@@ -382,7 +382,10 @@ function viewLive(main, scroll) {
     ...moments.map((m) => ({ t: m.t1, k: 1, m })),
   ].sort((a, b) => a.t - b.t || a.k - b.k || ((a.e || a.m).id < (b.e || b.m).id ? -1 : 1));
   if (!items.length) {
-    main.append(h('div', { class: 'empty' }, h('b', {}, 'Nothing above the score floor yet'), F.all ? 'No events match these filters.' : 'Moments appear here as they happen. Turn on “Show all events” to see every tick.'));
+    const all = [...S.moments.values()].filter((m) => m.sid === sid && m.status !== 'merged'), low = all.filter((m) => m.score < minScore()).length;
+    const head = !all.length ? 'No moments detected yet' : low ? `${low} moment${low === 1 ? '' : 's'} below score ${minScore()}` : 'No moments match these filters';
+    const sub = F.all ? 'No events match these filters.' : !all.length ? 'Moments appear here when a detector fires (a failing test that later passes, a reverted change, a retry loop). Turn on “Show all events” to see every tick.' : low ? 'Lower the Score slider to see them.' : 'Clear the kind, actor, time or search filters to see them.';
+    main.append(h('div', { class: 'empty' }, h('b', {}, head), sub));
     return;
   }
   const shown = items.slice(-S.limit);

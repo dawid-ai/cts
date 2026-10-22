@@ -13,7 +13,7 @@ const HELP = {
 
 usage: cts <command> [options]      (in Claude Code: /cts:<command>)
 
-  init [--demo] [--statusline]   create .cts/, optionally load the sample session / enable the status line
+  init [--demo] [--statusline [--global] [--force]]   create .cts/, optionally load the sample session / enable the status line
   open [--no-browser]            start the server if needed and open the dashboard
   watch [--once] [--plain]       terminal companion for a split pane: last five moments, open threads, drafts
   status                         server state, event count, last moment
@@ -58,7 +58,7 @@ Every command accepts --help.`,
   voice: 'cts voice [init|show|suggestions|accept <id>|reject <id>|undo <id>]\n  Your voice profile. Suggestions come from your edits to drafts; nothing is saved without accept.',
   extract: 'cts extract status|prepare|apply|run\n  Tier 2 extraction. `prepare [--limit N] [--min S]` prints the packet (candidates + only the spans they need).\n  `apply [file]` validates a JSON answer (stdin if no file) and appends extract.* events; anything that cites a missing event, an untraceable number or a non-quote is rejected with the reason.\n  `run [--via api|claude] [--model M]` does both: --via api (default) uses ANTHROPIC_API_KEY; --via claude uses your Claude Code login through `claude -p` (no tools, no saved session).\n  Rejected items get one repair round. To run it automatically, set "extraction": {"auto": "api"} or {"auto": "claude"} in .cts/cts.json; the dashboard server then runs it\n  at session end, when a candidate scores over extraction.urgentScore, and every extraction.everyMinutes while there is new work.',
   import: 'cts import bundle <file.cts.zip>   merge a bundle by event id (never overwrites local files)\ncts import events <file.ndjson|json>   merge a raw events export\ncts import marks <journal.md>   dated notes become human marks ("## 2026-10-20" then "- 14:30 note", "- ? 15:10 question")\ncts import posts <file.json|csv>   past posts (ts, channel, url, text, optional moment) become receipts attached to their moments\ncts import git [--repo <path>]\n  Create shipped/revert events from merges, reverts and tags in git history (of --repo, read-only, or this project).\ncts import transcripts [--since <days>] [--dir <path>] [--dry-run]\n  Rebuild the log for sessions that ran before CTS from ~/.claude/projects/<project>/ (subagent transcripts included).',
-  init: 'cts init [--demo] [--statusline]\n  Create .cts/. --demo loads the sample session. --statusline writes statusLine into .claude/settings.local.json.',
+  init: 'cts init [--demo] [--statusline [--global] [--force]]\n  Create .cts/. --demo loads the sample session. --statusline writes statusLine into .claude/settings.local.json,\n  or with --global into ~/.claude/settings.json (every project). An existing non-CTS status line is kept unless --force.',
   demo: 'cts demo [clear]\n  Load a sample two-session project, or remove it.',
   reindex: 'cts reindex\n  Delete index.sqlite and rebuild it from .cts/sessions/*.jsonl.',
   'subagent-statusline': 'cts subagent-statusline\n  Reads Claude Code\'s agent-panel JSON on stdin and prints one row per subagent that has CTS moments.\n  The plugin\'s settings.json registers it; nothing to set up.',
@@ -135,12 +135,12 @@ export async function main(argv) {
       try { (await import('./lib/registry.mjs')).register(root); } catch { /* the registry is a convenience */ }
       if (flag(args, '--demo')) { const { writeDemo } = await import('./lib/sample.mjs'); writeDemo(root); out('loaded the sample session (cts demo clear removes it)'); }
       if (flag(args, '--statusline')) {
-        const f = path.join(root, '.claude', 'settings.local.json');
-        const cur = readJson(f, {});
-        cur.statusLine = { type: 'command', command: `node "${path.join(HERE, '..', 'bin', 'cts')}" statusline` };
-        fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(cur, null, 2) + '\n');
-        out('status line enabled in ' + path.relative(root, f));
-      } else out('tip: cts init --statusline adds a CTS segment to this project\'s Claude Code status line');
+        const { install, claudeHome } = await import('./lib/statusline.mjs');
+        const global = flag(args, '--global'), f = global ? path.join(claudeHome(), 'settings.json') : path.join(root, '.claude', 'settings.local.json');
+        const shown = f.startsWith(root + path.sep) ? path.relative(root, f) : f;
+        if (install(f, { force: flag(args, '--force') }) === 'set') out('status line enabled in ' + shown + (global ? ' (every project)' : ''));
+        else out(`kept the existing status line in ${shown}; add --force to replace it`);
+      } else out('tip: cts init --statusline [--global] adds a CTS segment to Claude Code\'s status line');
       return out(`ready: ${paths(root).cts}\nnext: cts open`);
     }
     case 'demo': {
