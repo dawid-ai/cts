@@ -620,7 +620,7 @@ function draftCard(d) {
     h('header', {},
       h('span', { class: 'ch' }, d.channel), d.format !== d.channel ? h('span', { class: 'tag' }, d.format) : null, h('span', { class: 'tag', style: 'color:var(--c)' }, d.kind || ''), h('span', { class: 'mut mono' }, d.score ? `score ${d.score}` : ''),
       h('span', { class: 'badge b-' + d.status }, d.status === 'approved' && d.approval && d.approval.at ? 'scheduled' : d.status), d.origin === 'autopilot' ? h('span', { class: 'tag' }, `autopilot · ${d.mode}`) : null,
-      h('span', { class: 'tag', title: d.writer === 'template' ? 'Written from plain templates' : 'Told by the storyteller model' }, d.writer === 'template' ? 'template' : [d.writer, d.tone, d.quotes ? 'my words' : null].filter(Boolean).join(' · ')),
+      h('span', { class: 'tag', title: d.writer === 'template' ? 'Written from plain templates' : 'Told by the storyteller model' }, d.writer === 'template' ? 'template' : [d.angle, d.tone, d.quotes ? 'my words' : null].filter(Boolean).join(' · ') || d.writer),
       h('span', { class: 'grow' }), h('span', { class: 'mut' }, ago((Date.now() - d.created_t)) + ' ago' + (d.status === 'pending' ? ` · expires ${fmtD(d.expires_t)}` : ''))),
     m0 ? h('div', { class: 'src' }, 'from ', h('a', { href: `#/story`, onclick: (e) => { e.preventDefault(); S.sel = m0.id; setF({ view: 'story' }); } }, d.source.type === 'arc' ? `arc “${trunc(d.title || m0.headline, 80)}”` : `“${trunc(m0.headline, 90)}”`), m0.tp && m0.tp[0] ? [' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); openTranscript(m0.tp[0].id); } }, 'transcript')] : null) : null,
     editing ? ta : h('div', { class: 'preview', 'aria-label': 'Preview exactly as it will be published' }, posts),
@@ -631,6 +631,7 @@ function draftCard(d) {
     d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`).join(' · ')) : null,
     d.status === 'declined' && d.declined.reason ? h('div', { class: 'mut' }, `Declined: ${d.declined.reason}`) : null,
     d.status === 'replaced' ? h('div', { class: 'mut' }, 'Replaced by a rewrite') : null,
+    d.status === 'discarded' ? h('div', { class: 'mut' }, 'Discarded') : null,
     d.status === 'approved' && d.approval ? h('div', { class: 'mut' }, d.approval.at ? `Approved, goes out at ${fmtDT(Date.parse(d.approval.at))}` : 'Approved, waiting for the publish queue') : null,
     open && !S.drafts.private ? h('footer', { class: 'acts' },
       editing ? [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'edit', id: d.id, text: $('#ed-' + d.id).value }); S.editing = null; if (r && r.suggestions && r.suggestions.length) toast('Voice suggestion waiting below'); schedule(); } }, 'Save edit'), h('button', { class: 'btn', onclick: () => { S.editing = null; schedule(); } }, 'Cancel')]
@@ -641,9 +642,9 @@ function draftCard(d) {
           h('span', { class: 'rw' }, busy ? `Rewriting… ${Math.round((Date.now() - S.comp.t0) / 1000)}s` : ['Rewrite:', ...TONES.map(([tn]) => h('button', { class: 'btn', disabled: !!S.comp.busyOn, title: `Tell it again in the ${tn} tone with ${writerName(compVia())}`, onclick: () => writePost({ source: d.source.id, channel: d.channel, format: d.format, via: compVia(), tone: tn, quotes: compQuotes(), replace: d.id }, d.id) }, tn))])]) : null);
 }
 // ---------- Writing posts ----------
-const TONES = [['plain', 'Dev-log facts, no build-up'], ['story', 'What I tried, what got in the way, what I decided'], ['dramatic', 'A hook, tension and a turn; only what the log shows']];
+const TONES = [['wry', 'Dry, slightly sarcastic, worth a smirk'], ['dramatic', 'A hook, tension and a turn'], ['straight', 'Sincere and direct, no jokes']];
 const FORMATS = [['', 'Fits the channel'], ['short', 'Short post'], ['thread', 'Thread'], ['linkedin', 'LinkedIn post'], ['long', 'Article'], ['devlog', 'Dev-log lines']];
-const WRITERS = [['claude', 'Claude (your login)'], ['api', 'Claude API key'], ['template', 'Plain template, no model']];
+const WRITERS = [['claude', 'Claude (your login)'], ['api', 'Claude API key'], ['template', 'Template (dev-log lines only)']];
 const writerName = (v) => (WRITERS.find((w) => w[0] === v) || [, v])[1];
 const compVia = () => S.comp.via || (S.drafts && S.drafts.writer.via && S.drafts.writer.via !== 'template' ? S.drafts.writer.via : 'claude');
 const compQuotes = () => S.comp.quotes ?? !!(S.drafts && S.drafts.writer.quotes);
@@ -660,12 +661,12 @@ async function writePost(b, on) {
   try {
     const r = await api('/api/draft', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify({ op: 'create', force: true, ...b }) });
     c.last = r.id; if (on === 'composer') c.replace = null;
-    c.msg = r.fallback ? { warn: true, text: `${writerName(b.via)} wrote a version that broke a rule (${r.fallback}), so this is the plain template. Try again, or another tone.` }
-      : { text: b.via === 'template' ? 'Template draft written: it is in the queue below.' : `Written in the ${b.tone} tone: it is in the queue below. Nothing goes out until you approve it.` };
+    c.msg = { text: b.via === 'template' ? 'Dev-log draft written: it is in the queue below.' : `Written in the ${b.tone} voice${r.angle ? `, angle: ${r.angle}` : ''}. It is in the queue below; nothing goes out until you approve it.` };
     S.drafts = await api('/api/drafts');
   } catch (e) {
     const err = (e.body && e.body.error) || e.message;
-    c.msg = { warn: true, text: err, dup: /already exists/.test(err) ? b : null };
+    c.msg = e.body && e.body.skipped ? { text: `Nothing worth a post here, says ${writerName(b.via)}: ${e.body.why}. Try a whole arc, another moment or another voice.` }
+      : { warn: true, text: err, dup: /already exists/.test(err) ? b : null };
   } finally {
     clearInterval(tick); c.busyOn = null; schedule();
     setTimeout(() => { const el = c.last && document.querySelector(`.draft[data-id="${c.last}"]`); if (el && !c.msg.warn) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 80);
@@ -674,7 +675,7 @@ async function writePost(b, on) {
 function composer(D) {
   const c = S.comp, via = compVia(), model = via !== 'template';
   c.channel = c.channel && D.channels.includes(c.channel) ? c.channel : D.channels.includes('x') ? 'x' : D.channels[0];
-  const tone = c.tone || D.writer.tone || 'story';
+  const tone = c.tone || D.writer.tone || 'wry';
   const arcs = S.arcs.filter((a) => a.moments.length > 1 && !a.demo).sort((a, b) => b.t0 - a.t0);
   const ms = [...S.moments.values()].filter((m) => !['dismissed', 'merged', 'dropped'].includes(m.status) && m.kind !== 'wait').sort((a, b) => b.t0 - a.t0).slice(0, 80);
   if (!c.source) c.source = arcs.length ? 'arc:' + arcs[0].id : ms.length ? ms[0].id : null;
@@ -696,7 +697,7 @@ function composer(D) {
       pick('Writer', h('select', { onchange: (e) => { c.via = e.target.value; e.target.blur(); } }, WRITERS.map(([v, n]) => opt(v, n, via))))),
     h('div', { class: 'tones', role: 'radiogroup', 'aria-label': 'Tone' }, TONES.map(([v, help]) => h('button', { class: 'tone', role: 'radio', 'aria-checked': String(tone === v), disabled: !model, onclick: () => { c.tone = v; schedule(); } }, h('b', {}, v), h('span', {}, help)))),
     h('label', { class: 'qopt' + (model ? '' : ' off') }, h('input', { type: 'checkbox', checked: compQuotes(), disabled: !model, onchange: (e) => { c.quotes = e.target.checked; } }), 'Let it quote my own words: up to 2 short lines per post, exact, from my prompts, after redaction'),
-    !model ? h('div', { class: 'mut' }, 'Tone and quotes need a model writer. The template tells each moment in one plain sentence.') : null,
+    !model ? h('div', { class: 'mut' }, 'The template only writes dev-log lines (format Dev-log lines, or the changelog channel). A post needs Claude: it finds the angle, or tells you there isn\u2019t one.') : null,
     h('div', { class: 'acts' },
       h('button', { class: 'btn prim', disabled: !!c.busyOn || !c.source, onclick: go }, busy ? `Writing… ${secs}s` : c.replace ? 'Rewrite it' : 'Write it'),
       c.replace && !busy ? h('button', { class: 'btn', onclick: () => { c.replace = null; schedule(); } }, 'Write a new one instead') : null,
@@ -727,15 +728,17 @@ function viewDrafts(main) {
   const wrap = h('div', { class: 'drafts' });
   const top = h('div', { class: 'dtop' },
     h('div', {}, h('h2', { class: 'sec', style: 'margin:0' }, `Review queue (${D.counts.pending || 0})`), h('div', { class: 'mut' }, 'Nothing goes out without your approval or an auto-publish rule you set. Approved posts are written to your outbox and files, not to social networks.')),
-    h('button', { class: 'btn' + (D.paused ? ' on' : ''), 'aria-pressed': String(D.paused), onclick: () => dpost({ op: 'kill', on: !D.paused }) }, D.paused ? 'Publishing paused — resume' : 'Pause publishing'));
+    h('div', { class: 'acts', style: 'margin:0' },
+      D.counts.pending || D.counts.expired ? h('button', { class: 'btn', title: 'Throw away every pending draft. Unlike Decline, this teaches autopilot nothing.', onclick: async () => { if (!confirm(`Discard all ${(D.counts.pending || 0) + (D.counts.expired || 0)} pending drafts? Approved and published ones stay.`)) return; const r = await dpost({ op: 'discard-pending' }); if (r) toast(`Discarded ${r.discarded} drafts`); } }, 'Clear queue') : null,
+      h('button', { class: 'btn' + (D.paused ? ' on' : ''), 'aria-pressed': String(D.paused), onclick: () => dpost({ op: 'kill', on: !D.paused }) }, D.paused ? 'Publishing paused — resume' : 'Pause publishing')));
   wrap.append(top);
   if (D.private) wrap.append(h('div', { class: 'rep warn' }, 'This project is marked private in cts.json: drafting and publishing are disabled.'));
   else wrap.append(composer(D), voiceBox(D));
   const open = D.drafts.filter((d) => d.status === 'pending' || d.status === 'approved');
   const done = D.drafts.filter((d) => !['pending', 'approved'].includes(d.status));
-  if (!open.length) wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No drafts waiting'), 'Drafts appear here when a moment crosses your autopilot bar, or write one above.'));
+  if (!open.length) wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No drafts waiting'), 'Write one above. With a writer set in Settings, autopilot drafts strong moments too, and passes on the ones not worth a post.'));
   wrap.append(...open.map(draftCard));
-  if (done.length) wrap.append(h('details', { class: 'closed' }, h('summary', {}, `Published, declined, replaced, expired (${done.length})`), ...done.map(draftCard)));
+  if (done.length) wrap.append(h('details', { class: 'closed' }, h('summary', {}, `Published, declined, replaced, discarded, expired (${done.length})`), ...done.map(draftCard)));
   main.append(wrap);
 }
 

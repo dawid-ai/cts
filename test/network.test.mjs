@@ -62,8 +62,8 @@ test('no surface opens a non-loopback connection, resolves a hostname, or runs a
     const { startServer } = await import('../src/server.mjs');
     const pr = Project.open(root);
     assert.ok(pr.engine.listMoments().length >= 3, 'the fixture produces moments');
-    const made = N.autoDrafts(pr);
-    assert.ok(made.length >= 1, 'autopilot drafts');
+    const made = await N.autoStories(pr, { ask: async () => JSON.stringify({ worth_it: true, angle: 'grind', title: 'Again', text: 'I kept at it until the limiter finally passed.' }) });
+    assert.ok(made.length >= 1, 'autopilot drafts through the storyteller, which never touches the network here');
     notifyDrafts(pr, { send: () => {} });
     const id = made[0];
     N.approve(pr, id);

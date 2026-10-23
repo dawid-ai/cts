@@ -58,7 +58,7 @@ const hashes = (root) => Object.fromEntries(fs.readdirSync(paths(root).sessions)
 const allText = (root) => fs.readdirSync(paths(root).sessions).map((f) => fs.readFileSync(path.join(paths(root).sessions, f), 'utf8')).join('');
 
 test('trim removes old raw events, keeps every moment, thread, arc and draft, and reindex reproduces the same state', () => {
-  const root = seed({ retentionDays: 7, drafts: { kinds: ['fight', 'reversal', 'disagreement', 'shipped'], min: 0 } });
+  const root = seed({ retentionDays: 7, drafts: { kinds: ['fight', 'reversal', 'disagreement', 'shipped'], min: 0, channels: ['changelog'], arcChannels: ['changelog'] } });
   let pr = Project.open(root);
   // Decisions before the trim: a confirm, a dismissal, and drafts whose honesty guard cites old events.
   const fight = pr.engine.listMoments().find((m) => m.kind === 'fight');

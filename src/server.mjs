@@ -50,7 +50,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
       return { ...d, posts: (d.format === 'thread' ? postsOf(d.text) : [d.text.trim()]).map((t) => ({ text: t, chars: t.length })), limit: ch.limit || null, guard: chk, mode: N.modeFor(pr, d.kind, d.channel), cap: ch.cap ?? null, publishedToday: store.publishedToday(d.channel) };
     });
     return { drafts: list, suggestions: [...store.suggestions.values()], paused: PB.isPaused(pr), counts: N.counts(pr), channels: Object.keys(pr.cfg.publishing.channels || {}), private: !!pr.cfg.private, version: store.version,
-      writer: { via: pr.cfg.drafts.writer || 'template', tone: pr.cfg.drafts.tone || 'story', quotes: !!pr.cfg.drafts.quotes, model: pr.cfg.drafts.model } };
+      writer: { via: pr.cfg.drafts.writer || 'template', tone: N.toneOf(pr.cfg.drafts.tone), quotes: !!pr.cfg.drafts.quotes, model: pr.cfg.drafts.model } };
   };
   let sentVersion = -1, lastQueue = 0, actual = null, lastAutoCheck = 0;
   const auto = new AutoExtractor(pr, { ask: extractAsk });
@@ -65,7 +65,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
   const retention = () => { try { if (pr.cfg.retentionDays > 0) runTrim(); } catch (e) { fs.appendFileSync(p.hooklog, `${new Date().toISOString()} retention: ${e.stack}\n`); } };
   const retentionStart = setTimeout(retention, 60000); retentionStart.unref();
   const retentionDaily = setInterval(retention, 86400000); retentionDaily.unref();
-  // Autopilot drafts: templates at once, or storyteller runs one at a time (a run asked for while one is busy follows it).
+  // Autopilot drafts: dev-log templates at once, or storyteller runs one at a time (a run asked for while one is busy follows it).
   let stories = null, again = false;
   const drafting = () => {
     const w = pr.cfg.drafts.writer;
@@ -165,7 +165,9 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         const b = await body(req);
         let r;
         switch (b.op) {
-          case 'create': { const via = b.via || pr.cfg.drafts.writer, o = { channel: b.channel, format: b.format || undefined, force: !!b.force, replace: b.replace || undefined }; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { ...o, via, ask: storyAsk, tone: b.tone, quotes: b.quotes == null ? undefined : !!b.quotes }) : N.createDraft(pr, b.source, o); break; }
+          case 'create': { const via = b.via || pr.cfg.drafts.writer, o = { channel: b.channel, format: b.format || undefined, force: !!b.force, replace: b.replace || undefined }; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { ...o, via, ask: storyAsk, tone: b.tone, quotes: b.quotes == null ? undefined : !!b.quotes }) : N.draftPlain(pr, b.source, o); break; }
+          case 'discard': r = N.discard(pr, b.id, b.reason || ''); break;
+          case 'discard-pending': { const ids = pr.engine.drafts.list().filter((x) => x.status === 'pending' || x.status === 'expired').map((x) => x.id); for (const id of ids) N.discard(pr, id, b.reason || 'cleared'); r = { ok: true, discarded: ids.length }; break; }
           case 'approve': r = N.approve(pr, b.id, { at: b.at || undefined }); if (!r.error) { const pub = PB.publishDraft(pr, b.id); r.published = pub.ok ? pub.receipt : null; r.held = pub.ok ? null : pub.reason; } break;
           case 'edit': r = N.edit(pr, b.id, b.text); break;
           case 'decline': r = N.decline(pr, b.id, b.reason || ''); break;

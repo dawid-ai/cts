@@ -56,6 +56,7 @@ test('server: drafts API — list, approve/publish over HTTP with the CSRF guard
   const p = paths(root); fs.mkdirSync(p.sessions, { recursive: true });
   const sim = new Sim({ sid: 'd1', start: Date.now() - 600000 }); sim.start(); sim.prompt('add a limiter'); sim.adv(1); sim.prompt('wait, go back to the old logic'); sim.stop('ok');
   fs.writeFileSync(path.join(p.sessions, 'd1.jsonl'), sim.events.map(serialize).join(''));
+  fs.writeFileSync(p.config, JSON.stringify({ drafts: { channels: ['changelog'] } }));
   const s = await startServer({ root, port: 0, quiet: true, tickMs: 50 });
   try {
     await new Promise((r) => setTimeout(r, 300));
@@ -63,7 +64,7 @@ test('server: drafts API — list, approve/publish over HTTP with the CSRF guard
     assert.equal(d.drafts.length, 1, 'autopilot drafted the reversal'); assert.equal(d.drafts[0].status, 'pending'); assert.equal(d.drafts[0].guard.ok, true);
     const id = d.drafts[0].id;
     assert.equal((await post(s.port, '/api/draft', { op: 'approve', id })).status, 403, 'no x-cts header');
-    assert.equal((await get(s.port, '/api/draft/card?id=' + id)).status, 200);
+    assert.equal((await get(s.port, '/api/draft/card?id=' + id)).status, 404, 'dev-log lines have no share card');
     const H = { 'x-cts': '1' };
     assert.equal((await post(s.port, '/api/draft', { op: 'kill', on: true }, H)).status, 200);
     let r = JSON.parse((await post(s.port, '/api/draft', { op: 'approve', id }, H)).body);
@@ -76,12 +77,17 @@ test('server: drafts API — list, approve/publish over HTTP with the CSRF guard
     assert.equal((await post(s.port, '/api/draft', { op: 'nonsense' }, H)).status, 400);
     // writing from the dashboard: a duplicate is refused until it is asked as a rewrite, which replaces the open draft
     const src = d.drafts[0].source.id;
-    assert.match(JSON.parse((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template' }, H)).body).id, /^\w+$/);
-    assert.equal((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template' }, H)).status, 409);
-    const rw = JSON.parse((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template', replace: true }, H)).body);
+    assert.match(JSON.parse((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'x', via: 'template' }, H)).body).error, /dev-log lines/, 'templates never write posts');
+    const dl = { op: 'create', source: src, channel: 'x', format: 'devlog', via: 'template' };
+    assert.match(JSON.parse((await post(s.port, '/api/draft', dl, H)).body).id, /^\w+$/);
+    assert.equal((await post(s.port, '/api/draft', dl, H)).status, 409);
+    const rw = JSON.parse((await post(s.port, '/api/draft', { ...dl, replace: true }, H)).body);
     d = JSON.parse((await get(s.port, '/api/drafts')).body);
-    assert.equal(d.drafts.filter((x) => x.channel === 'linkedin' && x.status === 'replaced').length, 1); assert.equal(d.drafts.find((x) => x.id === rw.id).status, 'pending');
-    assert.deepEqual(d.writer, { via: 'template', tone: 'story', quotes: false, model: 'claude-sonnet-5-5' });
+    assert.equal(d.drafts.filter((x) => x.status === 'replaced').length, 1); assert.equal(d.drafts.find((x) => x.id === rw.id).status, 'pending');
+    assert.deepEqual(d.writer, { via: 'template', tone: 'wry', quotes: false, model: 'claude-sonnet-5-5' });
+    const cl = JSON.parse((await post(s.port, '/api/draft', { op: 'discard-pending' }, H)).body);
+    assert.equal(cl.discarded, 1); d = JSON.parse((await get(s.port, '/api/drafts')).body);
+    assert.equal(d.drafts.find((x) => x.id === rw.id).status, 'discarded'); assert.equal(d.drafts[d.drafts.length - 1].status, 'published', 'published drafts stay');
     // the voice profile: the template until saved; saving is guarded like every other write
     const v0 = JSON.parse((await get(s.port, '/api/voice')).body); assert.equal(v0.saved, false); assert.match(v0.text, /# CTS voice/);
     assert.equal((await post(s.port, '/api/voice', { text: 'max: 200\n' })).status, 403, 'no x-cts header');

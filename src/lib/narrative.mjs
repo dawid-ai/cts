@@ -56,7 +56,6 @@ function storyLines(pr, m) {
     case 'disagreement': { const [b, a] = m.actors || []; return [`${actorWord(pr, m, a || 'main')} pushed back on ${actorWord(pr, m, b || 'main')}.`.replace(/^./, (c) => c.toUpperCase())]; }
     case 'shipped':
       if (E.tag) return [`I released version ${String(E.tag).replace(/^v(?=\d)/, '')}.`];
-      if (E.stat) return [`Shipped it: ${plural(E.stat.ins + E.stat.del, 'line')} changed.`];
       if (/^Merged into/.test(h)) return ['I merged the work in.'];
       if (/^Pull request/.test(h)) return ['The pull request went in.'];
       if (/^Deployed again/.test(h)) return ['I deployed it again.'];
@@ -100,7 +99,7 @@ export function resolveSource(pr, id) {
   if (m) return { type: 'moment', id: m.id, m: e.view(m), ms: [e.view(m)] };
   return null;
 }
-export const formatFor = (src, channel) => (SOCIAL.includes(channel) ? (src.type === 'arc' && src.ms.length > 1 ? 'thread' : 'short') : channel === 'linkedin' ? 'linkedin' : channel === 'changelog' ? 'devlog' : 'long');
+export const formatFor = (src, channel) => (SOCIAL.includes(channel) ? 'short' : channel === 'linkedin' ? 'linkedin' : channel === 'changelog' ? 'devlog' : 'long');
 
 const lineFit = (lines, limit) => {
   lines = [...lines];
@@ -194,10 +193,12 @@ export function checkDraft(pr, d) {
   return { ok: problems.length === 0, problems, redactionClean: items === 0, redactionItems: items };
 }
 
-function cardFor(pr, m, channel, id) {
+function cardFor(pr, m, channel, id, story) {
   try {
     const opts = redactOpts(pr);
-    const pub = { id: m.id, kind: m.kind, score: m.score, headline: redact(firstPerson(m.headline), opts).text, actors: m.actors.map((a) => label(pr, m, a)), evidence: m.evidence, evidence_line: redact(evidenceLine(m), opts).text };
+    // A story's card carries its title and angle, not the dashboard headline and diff stats.
+    const pub = story ? { id: m.id, kind: m.kind, label: story.angle || 'story', score: '', headline: story.title, actors: m.actors.map((a) => label(pr, m, a)), evidence: {}, evidence_line: '' }
+      : { id: m.id, kind: m.kind, score: m.score, headline: redact(firstPerson(m.headline), opts).text, actors: m.actors.map((a) => label(pr, m, a)), evidence: m.evidence, evidence_line: redact(evidenceLine(m), opts).text };
     const dir = path.join(paths(pr.root).cts, 'drafts');
     fs.mkdirSync(dir, { recursive: true });
     const rel = path.join('drafts', `${id}.svg`);
@@ -225,13 +226,14 @@ function gate(pr, id, { channel, format, force, replace }) {
   // replace: a draft id to rewrite, or true for the open draft of this source, channel and format.
   const old = replace === true ? [...store.drafts.values()].find((x) => x.source.id === src.id && x.channel === channel && x.format === format && ['pending', 'approved'].includes(x.status)) : replace && store.get(replace);
   if (replace && (!old || !['pending', 'approved'].includes(old.status))) return { error: 'only a pending or approved draft can be rewritten' };
+  if (!force && store.skipped.has(`${src.id}|${channel}|${format}`)) return { error: `the storyteller passed on this one: ${store.skipped.get(`${src.id}|${channel}|${format}`)}` };
   if (!force && store.declined.has(src.id)) return { error: 'you declined a draft of this earlier; pass --force to draft it again' };
   if (store.existsFor(src.id, channel, format, old && old.id)) return { error: 'a draft for this already exists' };
   return { src, format, old };
 }
 
 /** Create one draft (as a draft.create event). `story` is a storyteller text that already passed storyProblems. */
-export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', force = false, mode, story, replace } = {}) {
+export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', force = false, mode, story, replace, extraNums = [] } = {}) {
   const g = gate(pr, id, { channel, format, force, replace });
   if (g.error) return g;
   const { src } = g; format = g.format;
@@ -243,13 +245,13 @@ export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', 
   const red = { report: [...(st ? [] : c.report), ...last.report] };
   const draft = ulid();
   const top = src.type === 'arc' ? src.ms.slice().sort((a, b) => b.score - a.score)[0] : src.m;
-  const card = ['short', 'linkedin', 'thread', 'long'].includes(format) ? cardFor(pr, top, channel, draft) : null;
+  const card = ['short', 'linkedin', 'thread', 'long'].includes(format) ? cardFor(pr, top, channel, draft, st) : null;
   const sid = top.sid;
   writeHumanEvent(pr.root, 'draft.create', {
     draft, source: { type: src.type, id: src.id, moments: src.ms.map((m) => m.id) }, channel, format, text: st ? st.text : c.text, title: st ? st.title : c.title,
-    claims: { refs: st ? st.refs : c.refs, extra: c.extra }, redaction: { count: red.report.length, summary: Object.entries(red.report.reduce((a, r) => (a[r.rule] = (a[r.rule] || 0) + 1, a), {})).map(([rule, n]) => ({ rule, n })), items: red.report.slice(0, 20) },
+    claims: { refs: st ? st.refs : c.refs, extra: [...new Set([...c.extra, ...extraNums])] }, redaction: { count: red.report.length, summary: Object.entries(red.report.reduce((a, r) => (a[r.rule] = (a[r.rule] || 0) + 1, a), {})).map(([rule, n]) => ({ rule, n })), items: red.report.slice(0, 20) },
     card, origin, score: top.score, kind: top.kind, voice_rev: c.voiceRev, mode: mode || modeFor(pr, top.kind, channel), writer: st ? st.writer : 'template',
-    tone: st ? st.tone : null, quotes: st ? !!st.quotes : false, replaces: g.old ? g.old.id : null,
+    tone: st ? st.tone : null, quotes: st ? !!st.quotes : false, angle: st ? st.angle || null : null, replaces: g.old ? g.old.id : null,
   }, { sid, actor: 'cts' });
   pr.sync();
   return { id: draft };
@@ -258,32 +260,47 @@ export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', 
 // The storyteller: the same draft told by a model as a story, through the user's Claude Code login or API key. It only
 // sees redacted, consent-filtered material, and its text is kept only if storyProblems finds nothing; else the template stays.
 export const TONES = {
-  plain: 'TONE: plain, like a dev log. Short and factual, no build-up, no hook.',
-  story: `TONE: a story a peer would read: what I was trying to do, what got in the way, what I decided and why. Like
-"I decided to do X instead of Y, because it seems like a better solution for now" or "I skipped the suggested Q and went with W instead. Will fix it later."`,
-  dramatic: `TONE: dramatic and punchy. Open on the moment things went sideways, not on the setup. Short sentences, real tension:
-what I expected, what actually happened, the beat where I lost patience or pushed back. The agent and I are two characters, and
-our misunderstandings and arguments are the plot. Let a real setback land before the fix. End on a turn or on what is still waiting to bite me.
-Dramatize what the material shows; never invent an event, a feeling, a reason or a stake it does not show.`,
+  wry: `VOICE: dry, deadpan, slightly sarcastic developer humor, the fast tech-news-roundup kind. Understatement, a sharp aside,
+a joke at my own expense, at the agent's or at the hype, never at other people. One or two good lines, not a stand-up set.
+Like: "I keep changing little things, a few lines at a time. Funny how little things take more time with AI, while massive jobs seem to just happen."`,
+  dramatic: `VOICE: dramatic and punchy. Open on the moment it went sideways, not on the setup. Short sentences, real tension: what I
+expected, what happened, the beat where I lost patience or pushed back. The agent and I are two characters. End on a turn.`,
+  straight: 'VOICE: sincere and direct, no jokes. Still one angle with a point, never a log.',
 };
+const TONE_ALIAS = { story: 'wry', plain: 'straight' };
+export const toneOf = (t) => (TONES[t] ? t : TONES[TONE_ALIAS[t]] ? TONE_ALIAS[t] : 'wry');
+export const ANGLES = ['fuckup', 'lesson', 'grind', 'discovery', 'surprise', 'irony', 'decision', 'argument'];
 const NO_QUOTES = '- Never quote. No quotation marks, no prompts or messages repeated word for word, no commands, code, flags, file names, paths, branch names, test names or error messages. Say in plain words what they were.';
 export const QUOTE_MAX = 15;
 const MY_QUOTES = `- Quotes: you may quote MY OWN words, only from events with type prompt and who human, at most 2 times, each at most ${QUOTE_MAX} words, copied exactly between “ and ”. Pick the line with the most feeling. Never quote an agent, and no commands, code, flags, file names, paths, branch names, test names or error messages. Everything else in plain words, never repeated word for word.`;
-/** The storyteller's instructions for a tone, with or without my own words as quotes. */
-export const storyRules = ({ tone = 'story', quotes = false } = {}) => `You are the CTS storyteller. You write one post in the author's own voice, first person, about what happened in their coding sessions.
-${TONES[tone] || TONES.story}
-The material is the log: prompts, agent messages and actions. It is what you tell the story from, not what you show.
-The post is about the listed moments ("what" says what each one was); the events before a moment are background that explains it.
+const LENGTH = { short: 'One post. Usually 1 to 4 sentences; it does not have to fill max_characters.', thread: 'A thread of 2 to 5 posts separated by a line with only --- on it, each one worth reading alone.', linkedin: 'About 500 to 1300 characters in short paragraphs. A first line that makes people click "more".', long: 'An article of 300 to 700 words in Markdown paragraphs (## headings allowed, no front matter) with a real arc.' };
+/** The storyteller's instructions: find the angle first, then write it in a voice, with or without my own words as quotes. */
+export const storyRules = ({ tone = 'wry', quotes = false, format = 'short' } = {}) => `You are the CTS storyteller. You write one post as me, first person, about what happened in my coding sessions with AI agents.
+The material is the log: my prompts, what the agents said and did, and facts per moment. It is what you tell the story from, not what you show.
+
+STEP 1, THE ANGLE. Do not narrate what happened. Find the one thing worth saying about it, the thing a developer would stop scrolling for.
+Look past the actions: ${ANGLES.join(', ')} (mine or the agent's). A fuckup someone made. A lesson I actually got. The grind: a slightly bored
+keep-going update. Something I found out. A surprise. An irony, like tiny changes eating the afternoon while the big job just happened. A
+decision and what it cost. An argument with the agent. Pick ONE angle and leave everything else out; a long arc still gets one angle.
+If nothing here would be worth reading, do not write filler: set worth_it to false and say why in one line.
+
+STEP 2, THE POST. ${TONES[toneOf(tone)]}
+${LENGTH[format] || LENGTH.short}
+
 HARD RULES (a validator rejects violations):
 ${quotes ? MY_QUOTES : NO_QUOTES}
-- Never name a person, a company or the project. Masked text such as [repo], [path] or [masked] stays out entirely; never guess what it was.
+- Never report line counts, file counts, test counts, diff stats or version numbers. Nobody cares. No changelog lists, no hashtags.
+- Facts (what happened, numbers, causes, who did what) must come from the material. Your take on them (the joke, the observation, the
+  lesson, the "funny how") is yours to write, as long as it is about what the material shows and never claims something happened that did not.
 - Every number you write must appear in the material. One number at most per post.
-- A reason, cause, outcome or lesson must be stated in the material, by me or by an agent. If none is, tell what happened and leave the why out. Never invent drama.
-- Stay within max_characters for each post. For a thread, write 2 to 8 posts separated by a line with only --- on it.
-- For an article, write Markdown paragraphs (## headings allowed), no front matter.
-- Write as the author: the agents are my tools, so what my session did is what I did, unless an agent's part is the point.
-- No filler, no stock phrases ("back to the drawing board", "what a day"), and never write about the material itself or how little it says. If there is little to tell, write one or two plain sentences.
-Follow the voice profile when it has one. Reply with ONLY a JSON object: {"title":"<a short title, no quotes>","text":"<the post>"}`;
+- Never name a person, a company or the project. Masked text such as [repo], [path] or [masked] stays out entirely; never guess what it was.
+- Stay within max_characters for each post.
+- Write as me: the agents are my tools, so what my session did is what I did, unless the agent's part is the point.
+- No stock phrases ("back to the drawing board", "what a day", "game-changer", "here's the thing", "lessons learned", "journey"), no
+  rhetorical question-and-answer setups, and never write about the material itself or how little it says.
+Follow the voice profile when it has one: its samples are how I really write.
+Reply with ONLY a JSON object: {"worth_it":true,"angle":"<one of ${ANGLES.join('|')}>","title":"<a short title, no quotes>","text":"<the post>"}
+or {"worth_it":false,"why":"<one line>"}`;
 export const STORY_RULES = storyRules();
 
 const ctxEvent = (pr, e) => {
@@ -295,14 +312,32 @@ const ctxEvent = (pr, e) => {
   return o;
 };
 const HOUR = 3600000;
+// What a moment was, for the storyteller: its kind in words and its dashboard headline (consented), never a template sentence.
+const KIND_WORDS = { fight: 'a failure I kept hitting before it passed', broke: 'a change broke something that worked', reversal: 'I pulled the work back to an earlier direction', refusal: 'I said no to a step', disagreement: 'one actor pushed back on another', shipped: 'work landed on the main branch', pivot: 'I switched approach', 'memory-cut': 'the agent lost context and re-read files', escalation: 'I switched models to get unstuck', misread: 'the agent misunderstood me', frustration: 'I was losing patience', recurring: 'a problem came back from an earlier session', detour: 'a failure sent the work into an unrelated part of the code', wait: 'the agent sat waiting for me', mark: 'I flagged this moment myself', learned: 'something was learned' };
+const whatOf = (pr, m) => { const c = consentMoment(pr, m); return `${KIND_WORDS[m.kind] || m.kind}: ${firstPerson(c.headline)}${c.note ? ` (my note: ${c.note})` : ''}`; };
+/** Numbers a story may lean on: time and effort since the moment before, attempts, waits. All go into the guard's traceable numbers. */
+function factsOf(pr, m, prev) {
+  const E = m.evidence || {}, f = {};
+  const from = prev ? prev.t1 : m.t0 - 3 * HOUR;
+  const evs = pr.events({ sid: m.sid, from, to: m.t1, limit: 2000, order: 'asc' });
+  if (prev) f.minutes_since_previous_moment = Math.max(1, Math.round((m.t0 - prev.t1) / MIN));
+  const prompts = evs.filter((e) => e.kind === 'prompt' && e.actor === 'human').length; if (prompts) f.my_prompts_since = prompts;
+  const edits = evs.filter((e) => e.kind === 'tool.pre' && /^(Edit|Write|MultiEdit|NotebookEdit)$/.test((e.d && e.d.tool) || '')).length; if (edits) f.file_edits_since = edits;
+  const fails = evs.filter((e) => e.kind === 'tool.fail' || (e.d && e.d.test && e.d.test.red)).length; if (fails) f.failed_runs_since = fails;
+  if (E.attempts) f.attempts = E.attempts;
+  if (E.minutes) f.minutes = E.minutes;
+  if (E.elapsed_ms) f.minutes_elapsed = Math.max(1, Math.round(E.elapsed_ms / MIN));
+  return f;
+}
 
 /** The packet a storyteller reads: per moment, the prompts before it, its own events and what the agents said right after. */
-export function storyPacket(pr, src, c, channel, format, { tone = 'story', quotes = false } = {}) {
+export function storyPacket(pr, src, c, channel, format, { tone = 'wry', quotes = false } = {}) {
   const voice = loadVoice(pr.root), v = voice.for(channel);
   const limit = Math.min(v.max || Infinity, ((pr.cfg.publishing.channels || {})[channel] || {}).limit || Infinity);
   const seen = new Set();
   const once = (e) => e && !seen.has(e.id) && seen.add(e.id);
-  const moments = c.ms.slice(0, 8).map((m) => {
+  let prev = null;
+  const moments = c.ms.slice(0, 12).map((m) => {
     const ids = m.span.ids.length > 12 ? [...m.span.ids.slice(0, 6), ...m.span.ids.slice(-6)] : m.span.ids;
     // What led up to it: the session's last prompts and agent reports in the 3 hours before. A moment from `cts import git`
     // has no session of its own, so it reads every session in that window.
@@ -313,16 +348,18 @@ export function storyPacket(pr, src, c, channel, format, { tone = 'story', quote
       ...ids.map((x) => pr.eventById(x)),
       ...pr.events({ sid: m.sid, kinds: ['turn.end', 'subagent.stop'], from: m.t0, to: m.t1 + 10 * MIN, limit: 3, order: 'asc' }),
     ].filter(once);
-    return { kind: m.kind, when: new Date(m.t0).toISOString().slice(0, 16), what: beat(pr, m).lines, events: evs.map((e) => ctxEvent(pr, e)) };
+    const f = factsOf(pr, m, prev); prev = m;
+    return { kind: m.kind, when: new Date(m.t0).toISOString().slice(0, 16), what: whatOf(pr, m), facts: f, events: evs.map((e) => ctxEvent(pr, e)) };
   });
   const material = redactDeep(moments, redactOpts(pr)).value;
   const user = JSON.stringify({
     channel, format: format === 'long' ? 'article' : format, max_characters: Number.isFinite(limit) ? limit : null, tone, may_quote_my_words: quotes,
-    voice_profile: trunc(voice.text, 3000) || null, plain_draft: c.text, moments: material,
+    voice_profile: trunc(voice.text, 3000) || null, moments: material,
   });
+  const extra = moments.flatMap((m) => Object.values(m.facts));
   const verbatim = material.flatMap((m) => m.events.filter((e) => e.type !== 'agent said').flatMap((e) => [e.text, e.result || '']));
   const quotable = quotes ? material.flatMap((m) => m.events.filter((e) => e.type === 'prompt' && e.who === 'human').map((e) => e.text)) : null;
-  return { system: storyRules({ tone, quotes }), user, refs: [...new Set([...c.refs, ...seen])].slice(0, 300), verbatim, quotable, limit };
+  return { system: storyRules({ tone, quotes, format }), user, refs: [...new Set([...c.refs, ...seen])].slice(0, 300), verbatim, quotable, limit, extra };
 }
 
 const words = (s) => String(s).toLowerCase().match(/[a-z0-9']+/g) || [];
@@ -347,6 +384,8 @@ export function storyProblems(pr, text, { refs = [], extra = [], verbatim = [], 
   const plain = (format === 'thread' ? postsOf(t) : [t]).map((x) => x.replace(/^\d+\/\d+\s/, '')).join('\n');
   if (/[“”"`]/.test(t)) p.push(quotable ? 'it shows code or uses straight quotes; quote only my own words, between “ and ”' : 'it quotes or shows code; tell it in plain words');
   if (/\[(?:repo|path|masked|redacted|url|internal-url|email|host|ip)\]|\[prompt withheld/.test(t)) p.push('it uses a masked placeholder');
+  if (/\b\d+\s+(?:lines?|files?|tests?)\b|[+−-]\d+\/[−-]\d+|\bv?\d+\.\d+\.\d+\b/i.test(plain)) p.push('it reports line, file or test counts, diff stats or version numbers; nobody cares, tell the story');
+  if (/(?:^|\s)#[a-z]\w+/i.test(plain)) p.push('no hashtags');
   if (PATHY.test(plain)) p.push('it names a command flag, a file or a path');
   if (Number.isFinite(limit) && (format === 'thread' ? postsOf(t) : [t]).some((x) => x.length > limit)) p.push(`a post is longer than ${limit} characters`);
   const grams = new Set();
@@ -378,14 +417,15 @@ function shapeStory(a, c, format, limit, quotes) {
 }
 
 /**
- * Draft through the storyteller. One repair round if the validator objects; if the story still fails (or the model call
- * does), the template draft is written instead and `fallback` says why. `ask(system, user)` returns the reply text.
+ * Draft through the storyteller: it picks an angle and writes it, or passes (worth_it false). One repair round if the
+ * validator objects; if the story still fails (or the model call does) there is no draft and `error` says why.
+ * `ask(system, user)` returns the reply text.
  */
 export async function writeStory(pr, id, { channel = 'x', format, via = 'claude', model, ask, force = false, origin = 'manual', mode, replace, tone, quotes } = {}) {
   const g = gate(pr, id, { channel, format, force, replace });
   if (g.error) return g;
   format = g.format;
-  tone = TONES[tone] ? tone : TONES[pr.cfg.drafts.tone] ? pr.cfg.drafts.tone : 'story';
+  tone = toneOf(tone || pr.cfg.drafts.tone);
   quotes = quotes ?? !!pr.cfg.drafts.quotes;
   const c = compose(pr, g.src, channel, format);
   if (!c) return { error: 'nothing to say about this one' };
@@ -393,15 +433,31 @@ export async function writeStory(pr, id, { channel = 'x', format, via = 'claude'
   model = model || pr.cfg.drafts.model || 'claude-sonnet-5-5';
   ask = ask || (via === 'api' ? (s, u) => askApi(s, u, { model }) : (s, u) => askClaude(s, u, { model }));
   const opts = redactOpts(pr);
-  const check = (a) => { const s = shapeStory(a, c, format, pk.limit, quotes); return { s, probs: storyProblems(pr, redact(s.text, opts).text, { ...pk, extra: c.extra, format }) }; };
-  let why;
+  const check = (a) => {
+    if (a && a.worth_it === false) return { skip: String(a.why || 'nothing worth a post here').slice(0, 200) };
+    const s = shapeStory(a, c, format, pk.limit, quotes);
+    return { s, angle: ANGLES.includes(a && a.angle) ? a.angle : null, probs: storyProblems(pr, redact(s.text, opts).text, { ...pk, extra: [...c.extra, ...pk.extra], format }) };
+  };
+  let why, skip = false;
   try {
     let r = check(parseAnswer(await ask(pk.system, pk.user)));
-    if (r.probs.length) r = check(parseAnswer(await ask(pk.system, `${pk.user}\n\nThe validator rejected your story:\n${r.probs.map((x) => '- ' + x).join('\n')}\nWrite it again and follow every rule. Reply with the JSON object only.`)));
-    if (!r.probs.length) return { ...createDraft(pr, id, { channel, format, force, origin, mode, replace: g.old && g.old.id, story: { ...r.s, refs: pk.refs, writer: via, tone, quotes } }), writer: via };
-    why = r.probs.join('; ');
+    if (!r.skip && r.probs.length) r = check(parseAnswer(await ask(pk.system, `${pk.user}\n\nThe validator rejected your story:\n${r.probs.map((x) => '- ' + x).join('\n')}\nWrite it again and follow every rule. Reply with the JSON object only.`)));
+    if (r.skip) { why = r.skip; skip = true; }
+    else if (!r.probs.length) return { ...createDraft(pr, id, { channel, format, force, origin, mode, replace: g.old && g.old.id, extraNums: pk.extra, story: { ...r.s, refs: pk.refs, writer: via, tone, quotes, angle: r.angle } }), writer: via, angle: r.angle };
+    else why = r.probs.join('; ');
   } catch (e) { why = String((e && e.message) || e); }
-  return { ...createDraft(pr, id, { channel, format, force, origin, mode, replace: g.old && g.old.id }), writer: 'template', fallback: why };
+  // No log-line filler in place of a story. Autopilot remembers the outcome so it does not ask again on every tick.
+  if (origin === 'autopilot') { writeHumanEvent(pr.root, 'draft.skip', { source: g.src.id, channel, format, why, worth_it: !skip }, { sid: (g.src.m || g.src.ms[0]).sid, actor: 'cts' }); pr.sync(); }
+  return skip ? { skipped: true, why, error: `nothing worth a post here: ${why}` } : { error: `the story did not pass the checks: ${why}` };
+}
+
+/** Plain templates write dev-log lines only; a social post or article needs the storyteller. */
+export const templateFormat = (f) => f === 'devlog';
+export function draftPlain(pr, id, o = {}) {
+  const src = resolveSource(pr, id);
+  const f = o.format || (src && formatFor(src, o.channel || 'x'));
+  if (src && !templateFormat(f)) return { error: 'plain templates only write dev-log lines; a post needs the storyteller (writer claude or api)' };
+  return createDraft(pr, id, o);
 }
 
 const effMin = (pr, kind) => {
@@ -432,7 +488,7 @@ export function autoWanted(pr, now = Date.now()) {
 }
 export function autoDrafts(pr, now = Date.now()) {
   const made = [];
-  for (const w of autoWanted(pr, now)) { const r = createDraft(pr, w.id, { channel: w.channel, origin: 'autopilot' }); if (r.id) made.push(r.id); }
+  for (const w of autoWanted(pr, now)) { const src = resolveSource(pr, w.id); if (!src || !templateFormat(formatFor(src, w.channel))) continue; const r = createDraft(pr, w.id, { channel: w.channel, origin: 'autopilot' }); if (r.id) made.push(r.id); }
   for (const id of made) maybeAutoApprove(pr, id);
   return made;
 }
@@ -467,6 +523,15 @@ export function approve(pr, id, { at, via = 'human', rule } = {}) {
   pr.sync();
   return { id: x.id };
 }
+/** Throw a draft away without teaching autopilot anything (unlike decline): for clearing out drafts nobody wants. */
+export function discard(pr, id, reason = '') {
+  const x = pr.engine.drafts.get(id);
+  if (!x) return { error: 'no such draft' };
+  if (!['pending', 'approved'].includes(x.status)) return { error: `draft is ${x.status}` };
+  writeHumanEvent(pr.root, 'draft.discard', { draft: x.id, reason: trunc(reason, 300) }, { sid: x.sid, actor: 'human' });
+  pr.sync();
+  return { id: x.id };
+}
 export function decline(pr, id, reason = '') {
   const x = pr.engine.drafts.get(id);
   if (!x) return { error: 'no such draft' };
@@ -477,7 +542,7 @@ export function decline(pr, id, reason = '') {
 export function edit(pr, id, text) {
   const x = pr.engine.drafts.get(id);
   if (!x) return { error: 'no such draft' };
-  if (['published', 'declined', 'replaced'].includes(x.status)) return { error: `draft is ${x.status}` };
+  if (['published', 'declined', 'replaced', 'discarded'].includes(x.status)) return { error: `draft is ${x.status}` };
   if (typeof text !== 'string' || !text.trim()) return { error: 'empty text' };
   const oldLen = x.text.length;
   const red = redact(text, redactOpts(pr));

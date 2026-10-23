@@ -102,11 +102,11 @@ export function cardSvg(m, size = 'og') {
   const fs = h > 900 ? 76 : 60;
   const lanes = m.actors.slice(0, 4);
   const pad = 72;
-  const big = m.evidence && (m.evidence.attempts ? [m.evidence.attempts, 'attempts'] : m.evidence.minutes ? [m.evidence.minutes, 'minutes'] : m.evidence.stat ? [m.evidence.stat.ins + m.evidence.stat.del, 'lines'] : null);
+  const big = m.evidence && (m.evidence.attempts ? [m.evidence.attempts, 'attempts'] : m.evidence.minutes ? [m.evidence.minutes, 'minutes'] : null);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(m.headline)}">
 <rect width="${w}" height="${h}" fill="#141413"/>
 <rect x="0" y="0" width="14" height="${h}" fill="${col}"/>
-<text x="${pad}" y="${pad + 20}" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="26" fill="${col}" letter-spacing="3">${esc(m.kind.toUpperCase())} · ${m.score}</text>
+<text x="${pad}" y="${pad + 20}" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="26" fill="${col}" letter-spacing="3">${esc(String(m.label || m.kind).toUpperCase())}${m.score === '' ? '' : ` · ${m.score}`}</text>
 ${lines.map((l, i) => `<text x="${pad}" y="${pad + 120 + i * (fs * 1.2)}" font-family="'Segoe UI',Seravek,Ubuntu,Calibri,sans-serif" font-weight="700" font-size="${fs}" fill="#ecebe6">${esc(l)}</text>`).join('\n')}
 ${big ? `<text x="${w - pad}" y="${h - pad - 70}" text-anchor="end" font-family="'Segoe UI',Seravek,Ubuntu,sans-serif" font-weight="800" font-size="150" fill="${col}">${esc(big[0])}</text><text x="${w - pad}" y="${h - pad - 30}" text-anchor="end" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="28" fill="#9b978f">${esc(big[1])}</text>` : ''}
 ${lanes.map((a, i) => `<rect x="${pad}" y="${h - pad - 30 - i * 0}" width="0" height="0"/><g transform="translate(${pad + i * 190},${h - pad - 36})"><rect width="170" height="8" rx="4" fill="${i === 0 && a === 'You' ? '#f08a56' : ['#6b8e9e', '#8e8e6b', '#8a6b9e', '#6b9e7d'][i % 4]}"/><text y="34" font-family="ui-monospace,Menlo,Consolas,monospace" font-size="20" fill="#9b978f">${esc(trunc(a, 16))}</text></g>`).join('\n')}

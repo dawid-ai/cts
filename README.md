@@ -96,36 +96,42 @@ re-import is a no-op, sessions already captured live are never overwritten).
 
 ## Drafts, the review queue and publishing
 
-`cts draft <moment|arc:<id>|last>` writes a post from a moment or arc, in your voice (`.cts/voice.md`, `cts voice`). Posts are
-first-person stories, not log lines: the log's prompts, commands, branches, paths, test names and error lines are what the story is told
-from, never what it quotes (the dashboard keeps them as evidence). One number per post, name the actors, no lesson unless you marked one
-or an extractor-confirmed `learned` moment exists.
+`cts draft <moment|arc:<id>|last>` writes a post from a moment or arc, in your voice (`.cts/voice.md`, `cts voice`). Posts are worth
+reading or they are not written: no "shipped 122 lines", no changelog in a trench coat. The log's prompts, commands, branches, paths, test
+names and error lines are what the story is told from, never what it quotes (the dashboard keeps them as evidence).
 
-Two writers. The default is plain templates ("It took 4 failed attempts before it finally passed."), which need no model. With
-`--via claude` (your Claude Code login through `claude -p`, no tools) or `--via api` (`ANTHROPIC_API_KEY`), or `"drafts": {"writer":
-"claude"}` for autopilot, the storyteller tells it: what you were doing, what got in the way, what you decided and why, from the prompts
-before the moment, its events and what the agents reported. It sees only redacted, consent-filtered material. Its text is kept only if
-it has no quotation marks, no code, flags, file names or paths, no run of six words copied from a prompt or command, no masked
-placeholder, every number traces to the cited events, and it fits the channel (long text loses whole sentences from the end). One
-repair round, then the template draft is written instead and the CLI says why. The model is `drafts.model` (`claude-sonnet-5-5`; on real
-history Haiku added lessons and asides the log did not support). Whether a stated reason is true is not checked by code: that is what you
-review, or the `cts:reviewer` agent.
+**The storyteller** writes posts, through your Claude Code login (`--via claude`, `claude -p` with no tools) or `ANTHROPIC_API_KEY`
+(`--via api`), or for autopilot with `"drafts": {"writer": "claude"}`. It works in two steps. First the angle: it looks past the actions for
+the one thing worth saying (a fuckup, a lesson, the grind, a discovery, a surprise, an irony, a decision, an argument with the agent) and
+picks one, even for a long arc. If nothing is worth reading it says so and no draft is made (on autopilot the pass is remembered as a
+`draft.skip`, so it is not asked again; `--force` asks anyway). Then the post, in a voice (`drafts.tone`, `--tone`, or the dashboard): `wry`
+(the default: dry, slightly sarcastic developer humor), `dramatic` (a hook, tension, a turn) or `straight` (sincere, no jokes).
 
-**Tone and quotes.** The storyteller has three tones (`drafts.tone`, `--tone`, or the dashboard): `plain` (dev-log facts), `story` (the
-default: what I tried, what got in the way, what I decided) and `dramatic` (open on the moment it went sideways, real tension, you and the
-agent as two characters, end on a turn; it dramatizes what the log shows and invents nothing). Quotes are off by default. With
-`drafts.quotes` (`--quotes`, or the dashboard checkbox) it may quote your own words: at most 2 quotes per post, each at most 15 words and an
-exact span of one of your prompts after redaction and consent. Agent text, commands, paths, test names and errors are never quotable, and
-a prompt you shared only as a summary (`cts consent`) can't be quoted at all.
+It reads only redacted, consent-filtered material: per moment, what it was, the prompts and agent reports around it, and effort facts
+(minutes since the previous moment, your prompts, file edits and failed runs since then, attempts). Facts must come from that material;
+the joke, the observation or the lesson is its own take on them. Its text is kept only if it has no quotation marks, no code, flags, file
+names or paths, no run of six words copied from a prompt or command, no line, file or test counts, diff stats or version numbers, no
+hashtags, no masked placeholder, every number traces to the cited events or the effort facts, and it fits the channel (long text loses whole
+sentences from the end). One repair round, then no draft, and the CLI or dashboard says why. The model is `drafts.model`
+(`claude-sonnet-5-5`). Whether a take is fair is not checked by code: that is what you review, or the `cts:reviewer` agent.
+
+**Quotes** are off by default. With `drafts.quotes` (`--quotes`, or the dashboard checkbox) it may quote your own words: at most 2 quotes per
+post, each at most 15 words and an exact span of one of your prompts after redaction and consent. Agent text, commands, paths, test names
+and errors are never quotable, and a prompt you shared only as a summary (`cts consent`) can't be quoted at all.
+
+**Templates** need no model and write dev-log lines only (`--format devlog`, or the changelog channel). With no writer set, autopilot drafts
+only those, and leaves posts to you.
 
 **From the dashboard.** The Drafts view has a **Write a post** panel: pick any moment or a whole arc (or use **Write a post** on a moment card or
-**Write this chapter up** on a Story chapter), the channel, the format, the writer, the tone and quotes, and the draft lands in the queue,
-with the seconds counting while the model writes. Each open draft has **Rewrite: plain · story · dramatic**: the new draft replaces the old one,
-which is closed as `replaced` (not declined, so autopilot doesn't count it against that kind). The **Voice profile** panel edits `.cts/voice.md`
-in place and lists the voice suggestions. Formats: short post, thread
-(arcs), LinkedIn, long Markdown with front matter, dev-log line, each with an optional SVG share card. Everything passes the redactor first
-and the preview shows masked text highlighted; the draft carries a redaction report and an honesty-guard result (numbers and quotes must trace
-to the cited events; your edits are checked too).
+**Write this chapter up** on a Story chapter), the channel, the format, the writer, the voice and quotes, and the draft lands in the queue,
+with the seconds counting while the model writes, or the panel says why there was nothing worth a post. Each open draft has **Rewrite: wry ·
+dramatic · straight**: the new draft replaces the old one, which is closed as `replaced` (not declined, so autopilot doesn't count it against
+that kind). **Clear queue** discards every pending draft without teaching autopilot anything (`cts queue discard --pending`); **Decline** is
+the one that teaches. The **Voice profile** panel edits `.cts/voice.md` in place and lists the voice suggestions; paste posts you wrote into
+its Samples. Formats: short post (the default on social channels, for arcs too), thread (`--format thread`), LinkedIn, long Markdown with
+front matter, dev-log line; posts carry an SVG share card with the story's title and angle. Everything passes the redactor first and the
+preview shows masked text highlighted; the draft carries a redaction report and an honesty-guard result (numbers and quotes must trace to
+the cited events; your edits are checked too).
 
 The gate: nothing is published without a recorded `draft.approve` for the exact current text (an edit voids it), or an explicit
 `drafts.modes` auto rule with a clean guard and a clean redaction report (nothing masked at all). `cts pause publishing` (or the dashboard button)

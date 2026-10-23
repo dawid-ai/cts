@@ -61,7 +61,8 @@ test('guard rejects an edited draft with an invented number, a fake quote, or a 
 test('arc → thread and linkedin and long and devlog formats', () => {
   const { pr } = setup();
   const arc = pr.engine.arcs().find((a) => a.moments.length > 1); assert.ok(arc);
-  const t = N.createDraft(pr, 'arc:' + arc.id, { channel: 'x' }); const th = pr.engine.drafts.get(t.id);
+  assert.equal(N.formatFor(N.resolveSource(pr, 'arc:' + arc.id), 'x'), 'short', 'a social post is one post unless a thread is asked for');
+  const t = N.createDraft(pr, 'arc:' + arc.id, { channel: 'x', format: 'thread' }); const th = pr.engine.drafts.get(t.id);
   assert.equal(th.format, 'thread'); assert.match(th.text, /^1\/\d /); assert.ok(th.text.split('\n\n---\n\n').every((p) => p.length <= 280));
   for (const [ch, fmt] of [['linkedin', 'linkedin'], ['blog', 'long'], ['changelog', 'devlog']]) {
     const r = N.createDraft(pr, 'arc:' + arc.id, { channel: ch }); assert.ok(r.id, JSON.stringify(r));
@@ -85,8 +86,12 @@ test('declined sources are never regenerated unless forced; duplicates are not c
   pr.close();
 });
 
-test('autopilot drafts shipped/reversal over the bar; below the bar and dismissed ones are skipped', () => {
-  const { pr } = setup();
+test('autopilot drafts shipped/reversal over the bar; below the bar and dismissed ones are skipped; templates never write posts', () => {
+  const plain = setup();
+  assert.equal(N.autoDrafts(plain.pr).length, 0, 'no writer: no template posts for x or linkedin');
+  assert.match(N.draftPlain(plain.pr, momentOf(plain.pr, 'shipped').id, { channel: 'x' }).error, /dev-log lines/);
+  plain.pr.close();
+  const { pr } = setup({ drafts: { channels: ['changelog'], arcChannels: [] } });
   const made = N.autoDrafts(pr);
   const kinds = made.map((id) => pr.engine.drafts.get(id).kind);
   assert.ok(kinds.includes('shipped') && kinds.includes('reversal'));
@@ -200,7 +205,7 @@ test('voice: profile shapes drafts; edits are offered to the profile exactly onc
 
 test('notify mode: each draft is announced once (desktop + terminal), never repeated after reindex; draft mode stays silent', async () => {
   const { notifyDrafts } = await import('../src/lib/notify.mjs');
-  const { root, pr } = setup({ drafts: { modes: { 'shipped:x': 'notify' } } });
+  const { root, pr } = setup({ drafts: { channels: ['changelog'], modes: { 'shipped:changelog': 'notify' } } });
   N.autoDrafts(pr);
   const sent = [];
   const send = (t, b) => sent.push([t, b]);
@@ -214,7 +219,7 @@ test('notify mode: each draft is announced once (desktop + terminal), never repe
   assert.deepEqual(notifyDrafts(pr, { send }), []); assert.equal(sent.length, 1);
   assert.ok(pr.engine.drafts.get(ids[0]).notified.via.includes('desktop'));
   pr.close();
-  const off = setup({ drafts: { modes: { 'shipped:x': 'notify' } }, notify: { desktop: false } });
+  const off = setup({ drafts: { channels: ['changelog'], modes: { 'shipped:changelog': 'notify' } }, notify: { desktop: false } });
   N.autoDrafts(off.pr);
   const sent2 = [];
   assert.ok(notifyDrafts(off.pr, { send: (t, b) => sent2.push(t) }).length >= 1);
@@ -271,7 +276,7 @@ test('storyteller: a story that follows the rules becomes the draft; it saw only
   pr.close();
 });
 
-test('storyteller: quotes, commands, paths, copied prompts and invented numbers are refused; one repair round, then the template', async () => {
+test('storyteller: quotes, commands, paths, copied prompts, diff stats and invented numbers are refused; one repair round, then no draft', async () => {
   const { pr } = brokeSetup();
   const m = momentOf(pr, 'broke');
   const pk = (() => { const src = N.resolveSource(pr, m.id); return N.storyPacket(pr, src, N.compose(pr, src, 'x', 'short'), 'x', 'short'); })();
@@ -282,20 +287,23 @@ test('storyteller: quotes, commands, paths, copied prompts and invented numbers 
   bad('I told it the ratchet has to be even, keep the probability deterministic, and it broke.', /word for word/);
   bad('It took 9 tries to get the ratchet right.', /not traceable/);
   bad('The [repo] tests broke after a change.', /placeholder/);
+  bad('Shipped it: 43 lines changed, and it felt great.', /nobody cares/);
+  bad('Version 0.2.10 is out and one test broke on the way.', /nobody cares/);
+  bad('One test broke. Again. #buildinpublic', /hashtags/);
   assert.deepEqual(N.storyProblems(pr, 'A change broke one test. I kept the change and fixed the test, since even steps matter more here.', { ...pk, format: 'short' }), []);
   let calls = 0;
   const r = await N.writeStory(pr, m.id, { channel: 'x', via: 'api', ask: async (sys, user) => { calls++; if (calls === 2) assert.match(user, /validator rejected your story:\n- it quotes/); return JSON.stringify({ title: 't', text: 'I said “keep it even” and one test broke.' }); } });
-  assert.equal(calls, 2, 'one repair round'); assert.equal(r.writer, 'template'); assert.match(r.fallback, /quotes/);
-  assert.equal(pr.engine.drafts.get(r.id).writer, 'template');
+  assert.equal(calls, 2, 'one repair round'); assert.equal(r.id, undefined, 'no log-line filler in place of a story'); assert.match(r.error, /did not pass the checks: it quotes/);
   const r2 = await N.writeStory(pr, m.id, { channel: 'linkedin', ask: async () => { throw new Error('claude -p failed (exit 1)'); } });
-  assert.ok(r2.id); assert.match(r2.fallback, /exit 1/, 'a failed model call still leaves the template draft');
+  assert.equal(r2.id, undefined); assert.match(r2.error, /exit 1/);
+  assert.equal(pr.engine.drafts.list().length, 0);
   pr.close();
 });
 
 test('storyteller: threads are renumbered, articles keep their front matter, autopilot uses drafts.writer', async () => {
   const { pr } = setup({ drafts: { writer: 'claude' } });
   const arc = pr.engine.arcs().find((a) => a.moments.length > 1);
-  const t = await N.writeStory(pr, 'arc:' + arc.id, { channel: 'x', ask: async () => JSON.stringify({ title: 'Back to the old way', text: 'The tests kept failing, 4 times in a row.\n---\nI stopped and went back to the earlier approach.' }) });
+  const t = await N.writeStory(pr, 'arc:' + arc.id, { channel: 'x', format: 'thread', ask: async () => JSON.stringify({ title: 'Back to the old way', text: 'The tests kept failing, 4 times in a row.\n---\nI stopped and went back to the earlier approach.' }) });
   assert.equal(t.writer, 'claude', JSON.stringify(t));
   assert.equal(pr.engine.drafts.get(t.id).text, '1/2 The tests kept failing, 4 times in a row.\n\n---\n\n2/2 I stopped and went back to the earlier approach.');
   const l = await N.writeStory(pr, 'arc:' + arc.id, { channel: 'blog', ask: async () => JSON.stringify({ title: 'Back to the old way', text: '## What happened\n\nThe tests kept failing, so I went back to the earlier approach.' }) });
@@ -314,7 +322,8 @@ test('storyteller: tone sets the instructions; with quotes on, only short exact 
   const m = momentOf(pr, 'broke');
   const src = N.resolveSource(pr, m.id), c = N.compose(pr, src, 'x', 'short');
   assert.match(N.storyPacket(pr, src, c, 'x', 'short', { tone: 'dramatic' }).system, /dramatic and punchy[\s\S]*Never quote/);
-  assert.match(N.storyPacket(pr, src, c, 'x', 'short').system, /a story a peer would read/, 'story is the default tone');
+  assert.match(N.storyPacket(pr, src, c, 'x', 'short').system, /dry, deadpan/, 'wry is the default voice');
+  assert.match(N.storyPacket(pr, src, c, 'x', 'short', { tone: 'story' }).system, /dry, deadpan/, 'the old tone names still work');
   const pk = N.storyPacket(pr, src, c, 'x', 'short', { tone: 'dramatic', quotes: true });
   assert.match(pk.system, /quote MY OWN words/); assert.doesNotMatch(pk.system, /Never quote\./);
   const probs = (text) => N.storyProblems(pr, text, { ...pk, format: 'short' });
@@ -371,4 +380,54 @@ test('a story over the limit loses whole sentences, and a version number is not 
   const t = pr.engine.drafts.get(r.id).text;
   assert.ok(t.length <= 280 && /fix\.$/.test(t) && !/version/.test(t), t);
   pr.close();
+});
+
+test('storyteller: it can pass on a moment; by hand nothing is written, on autopilot the pass is remembered so it is not asked again', async () => {
+  const { root, pr } = setup({ drafts: { writer: 'claude' } });
+  const m = momentOf(pr, 'shipped');
+  const no = async () => JSON.stringify({ worth_it: false, why: 'a routine commit, nothing happened' });
+  const r = await N.writeStory(pr, m.id, { channel: 'x', ask: no });
+  assert.equal(r.id, undefined); assert.equal(r.skipped, true); assert.match(r.error, /nothing worth a post here: a routine commit/);
+  assert.equal(pr.engine.drafts.skipped.size, 0, 'a pass asked for by hand is not remembered');
+  let asked = 0;
+  await N.autoStories(pr, { ask: async (s, u) => { asked++; return no(s, u); } });
+  assert.ok(asked >= 1 && pr.engine.drafts.list().length === 0);
+  const n = asked;
+  assert.equal((await N.autoStories(pr, { ask: async () => { asked++; return no(); } })).length, 0);
+  assert.equal(asked, n, 'passed sources are not asked again');
+  assert.match((await N.writeStory(pr, m.id, { channel: 'x', ask: no })).error, /passed on this one/);
+  const ok = await N.writeStory(pr, m.id, { channel: 'x', force: true, ask: async () => JSON.stringify({ worth_it: true, angle: 'irony', title: 'Tiny fix, long day', text: 'I put the old logic back. Funny how undoing takes longer than doing.' }) });
+  assert.ok(ok.id, JSON.stringify(ok)); assert.equal(ok.angle, 'irony');
+  const d = pr.engine.drafts.get(ok.id);
+  assert.equal(d.angle, 'irony');
+  assert.match(fs.readFileSync(path.join(paths(root).cts, d.card), 'utf8'), /IRONY[\s\S]*Tiny fix, long day/, 'the card carries the story, not the diff stats');
+  pr.close();
+  const again = Project.open(root); assert.equal(again.engine.drafts.skipped.size >= 1, true, 'the pass survives a replay'); again.close();
+});
+
+test('storyteller packet: facts about effort instead of a template draft; the facts are numbers the guard accepts', () => {
+  const { pr } = setup();
+  const src = N.resolveSource(pr, 'arc:' + pr.engine.arcs().find((a) => a.moments.length > 1).id);
+  const pk = N.storyPacket(pr, src, N.compose(pr, src, 'x', 'short'), 'x', 'short');
+  const u = JSON.parse(pk.user);
+  assert.equal(u.plain_draft, undefined, 'no log-line draft to anchor on');
+  assert.ok(u.moments.every((m) => typeof m.what === 'string' && m.facts && typeof m.facts === 'object'));
+  assert.ok(u.moments.some((m) => m.facts.failed_runs_since >= 1 || m.facts.attempts), JSON.stringify(u.moments.map((m) => m.facts)));
+  assert.match(pk.system, /STEP 1, THE ANGLE/); assert.match(pk.system, /worth_it/);
+  const n = u.moments.map((m) => m.facts.failed_runs_since || m.facts.attempts).find(Boolean);
+  assert.deepEqual(N.storyProblems(pr, `I failed ${n} times before it passed, which is about par for a limiter.`, { ...pk, extra: pk.extra, format: 'short' }), []);
+  pr.close();
+});
+
+test('discard throws a draft away without teaching autopilot: no decline, no raised bar, the source can be drafted again', () => {
+  const { root, pr } = setup();
+  const m = momentOf(pr, 'fight');
+  const a = N.createDraft(pr, m.id, { channel: 'x' }).id;
+  assert.ok(N.discard(pr, a, 'old style').id);
+  const x = pr.engine.drafts.get(a);
+  assert.equal(x.status, 'discarded'); assert.equal(pr.engine.drafts.declined.size, 0);
+  assert.match(N.approve(pr, a).error, /discarded/); assert.match(N.discard(pr, a).error, /discarded/);
+  assert.ok(N.createDraft(pr, m.id, { channel: 'x' }).id, 'drafting it again is allowed');
+  pr.close();
+  const again = Project.open(root); assert.equal(again.engine.drafts.get(a).status, 'discarded'); again.close();
 });

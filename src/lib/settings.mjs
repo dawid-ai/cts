@@ -21,9 +21,9 @@ export const FIELDS = [
   { path: 'drafts.channels', section: 'Autopilot', label: 'Channels for moment drafts', type: 'set', options: CHANNELS },
   { path: 'drafts.arcChannels', section: 'Autopilot', label: 'Channels for finished arcs', type: 'set', options: CHANNELS },
   { path: 'drafts.modes', section: 'Autopilot', label: 'Rules (key = mode)', type: 'modes', help: 'One per line: kind:channel, kind or channel = draft | notify | auto. Auto still needs a clean guard and nothing masked.' },
-  { path: 'drafts.writer', section: 'Autopilot', label: 'Who writes drafts', type: 'enum', options: ['off', 'claude', 'api'], help: 'off = plain templates. claude (your Claude Code login) or api (ANTHROPIC_API_KEY) tells each draft as a story from redacted material; a story that fails the checks falls back to the template.' },
+  { path: 'drafts.writer', section: 'Autopilot', label: 'Who writes drafts', type: 'enum', options: ['off', 'claude', 'api'], help: 'claude (your Claude Code login) or api (ANTHROPIC_API_KEY) finds an angle in redacted material and writes the post, or passes when nothing is worth it. off = autopilot only writes dev-log lines (the changelog channel); posts are written by hand from Drafts.' },
   { path: 'drafts.model', section: 'Autopilot', label: 'Storyteller model', type: 'text', max: 100 },
-  { path: 'drafts.tone', section: 'Autopilot', label: 'Storyteller tone', type: 'enum', options: ['plain', 'story', 'dramatic'], help: 'plain = dev-log facts; story = what I tried, what got in the way, what I decided; dramatic = a hook, tension and a turn, still only what the log shows.' },
+  { path: 'drafts.tone', section: 'Autopilot', label: 'Storyteller tone', type: 'enum', options: ['wry', 'dramatic', 'straight'], dflt: 'wry', help: 'wry = dry, slightly sarcastic dev humor; dramatic = a hook, tension and a turn; straight = sincere, no jokes. Every tone finds one angle first and only uses facts from the log.' },
   { path: 'drafts.quotes', section: 'Autopilot', label: 'Let the storyteller quote my own words', type: 'bool', help: 'Up to 2 short quotes per post, exact words from your own prompts, after redaction and consent. Never agent text, commands, paths or errors.' },
   { path: 'drafts.expireDays', section: 'Autopilot', label: 'Pending drafts expire after (days)', type: 'int', min: 1, max: 90 },
   ...CHANNELS.flatMap((c) => [
