@@ -18,6 +18,7 @@ import { companionData } from './lib/companion.mjs';
 import { getSettings, applySettings, setVistaProfile } from './lib/settings.mjs';
 import { TAGS, tagValues } from './lib/tags.mjs';
 import * as VS from './lib/vista.mjs';
+import * as IM from './lib/images.mjs';
 import { AutoExtractor } from './lib/autoextract.mjs';
 import { trim } from './lib/retention.mjs';
 import { register, listProjects, projectSummaries } from './lib/registry.mjs';
@@ -53,6 +54,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
     });
     return { drafts: list, suggestions: [...store.suggestions.values()], paused: PB.isPaused(pr), counts: N.counts(pr), channels: Object.keys(pr.cfg.publishing.channels || {}), private: !!pr.cfg.private, version: store.version,
       vista: { connected: VS.status().connected, as: Object.fromEntries(Object.entries(pr.cfg.publishing.channels || {}).filter(([, c]) => c.vista && c.vista.profile_id).map(([k, c]) => [k, c.vista.name || String(c.vista.profile_id)])) },
+      images: { templates: IM.TEMPLATE_IDS.map((k) => [k, IM.TEMPLATES[k].label]), repo: ((pr.cfg.images || {}).github || {}).repo || '', png: !!IM.chromium() },
       writer: { via: pr.cfg.drafts.writer || 'template', tone: N.toneOf(pr.cfg.drafts.tone), quotes: !!pr.cfg.drafts.quotes, model: pr.cfg.drafts.model } };
   };
   let sentVersion = -1, lastQueue = 0, actual = null, lastAutoCheck = 0;
@@ -154,6 +156,29 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         if (!f || !f.startsWith(p.cts) || !fs.existsSync(f)) return json(res, 404, { error: 'no card' });
         res.writeHead(200, { 'content-type': MIME['.svg'], 'cache-control': 'no-store' }); return res.end(fs.readFileSync(f));
       }
+      // Share images: a draft's own (SVG for the preview, PNG to download), or one drawn on the fly for the Story and Hotspots views.
+      if (url.pathname === '/api/draft/image') {
+        const x = pr.engine.drafts.get(url.searchParams.get('id') || ''), n = +url.searchParams.get('n');
+        const im = x && x.images.find((i) => i.n === n);
+        if (!im) return json(res, 404, { error: 'no such image' });
+        const fmt = url.searchParams.get('fmt') === 'png' ? 'png' : 'svg', svgF = IM.imageFile(root, x.id, n, 'svg');
+        let f = IM.imageFile(root, x.id, n, fmt);
+        if (fmt === 'png' && !fs.existsSync(f) && fs.existsSync(svgF)) { try { await IM.renderPng(svgF, im.w, im.h); } catch (e) { return json(res, 501, { error: e.message }); } }
+        if (!fs.existsSync(f)) return json(res, 404, { error: 'the image file is missing: make it again' });
+        res.writeHead(200, { 'content-type': fmt === 'png' ? 'image/png' : MIME['.svg'], 'cache-control': 'no-store', ...(url.searchParams.get('download') ? { 'content-disposition': `attachment; filename="cts-${im.template}-${x.id.slice(-6)}.${fmt}"` } : {}) });
+        return res.end(fs.readFileSync(f));
+      }
+      if (url.pathname === '/api/image') {
+        pr.sync();
+        const t = IM.TEMPLATES[url.searchParams.get('template')] ? url.searchParams.get('template') : 'poster';
+        const s = url.searchParams.get('source');
+        const src = s ? N.resolveSource(pr, s) : (() => { const a = pr.engine.arcs().filter((x) => !x.demo).sort((a2, b2) => b2.t1 - a2.t1)[0]; return a ? N.resolveSource(pr, 'arc:' + a.id) : null; })();
+        const svgText = IM.drawImage(t, IM.imageData(pr, { src }));
+        if (url.searchParams.get('fmt') !== 'png') { res.writeHead(200, { 'content-type': MIME['.svg'], 'cache-control': 'no-store' }); return res.end(svgText); }
+        const dir = path.join(IM.imagesDir(root), 'adhoc'); fs.mkdirSync(dir, { recursive: true });
+        const f = path.join(dir, `${t}.svg`); fs.writeFileSync(f, svgText);
+        try { const png = await IM.renderPng(f, IM.TEMPLATES[t].w, IM.TEMPLATES[t].h); res.writeHead(200, { 'content-type': 'image/png', 'cache-control': 'no-store', 'content-disposition': `attachment; filename="cts-${t}.png"` }); return res.end(fs.readFileSync(png)); } catch (e) { return json(res, 501, { error: e.message }); }
+      }
       if (url.pathname === '/api/voice' && req.method === 'POST') {
         const origin = req.headers.origin;
         if (req.headers['x-cts'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) return json(res, 403, { error: 'forbidden' });
@@ -171,6 +196,8 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         switch (b.op) {
           case 'create': { const via = b.via || pr.cfg.drafts.writer, o = { channel: b.channel, format: b.format || undefined, force: !!b.force, replace: b.replace || undefined }; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { ...o, via, ask: storyAsk, tone: b.tone, quotes: b.quotes == null ? undefined : !!b.quotes }) : N.draftPlain(pr, b.source, o); break; }
           case 'discard': r = N.discard(pr, b.id, b.reason || ''); break;
+          case 'image': { const via = b.via === 'template' ? null : b.via || pr.cfg.drafts.writer; r = await IM.createImage(pr, b.id, { template: b.template || 'surprise', via, ask: storyAsk }); break; }
+          case 'attach': r = IM.attachImage(pr, b.id, b.n == null ? null : +b.n); break;
           case 'restore': r = N.restore(pr, b.id); break;
           case 'discard-pending': { const ids = pr.engine.drafts.list().filter((x) => x.status === 'pending' || x.status === 'expired').map((x) => x.id); for (const id of ids) N.discard(pr, id, b.reason || 'cleared'); r = { ok: true, discarded: ids.length }; break; }
           case 'approve': r = N.approve(pr, b.id, { at: b.at || undefined }); if (!r.error) { const pub = PB.publishDraft(pr, b.id); r.published = pub.ok ? pub.receipt : null; r.held = pub.ok ? null : pub.reason; } break;

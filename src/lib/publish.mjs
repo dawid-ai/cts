@@ -7,6 +7,7 @@ import { writeHumanEvent } from './log.mjs';
 import { textHash, postsOf } from './drafts.mjs';
 import { checkDraft, modeFor } from './narrative.mjs';
 import * as VS from './vista.mjs';
+import { attachedUrl } from './images.mjs';
 
 const slug = (s) => String(s || 'post').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 50) || 'post';
 const stamp = (t) => new Date(t).toISOString().slice(0, 16).replace(/[-:]/g, '').replace('T', '-');
@@ -139,7 +140,7 @@ export const VISTA_FORMATS = ['short', 'thread', 'linkedin'];
  * made for Vista ({to:'vista'}) counts, never autopilot. A thread goes out as one post with the rest as reply comments.
  * `session` is for tests.
  */
-export async function postToVista(pr, id, { now = Date.now(), session, when = 'now' } = {}) {
+export async function postToVista(pr, id, { now = Date.now(), session, when = 'now', upload, render } = {}) {
   const no = (reason) => ({ ok: false, reason });
   const g = gates(pr, id, now);
   if (g.reason) return no(g.reason);
@@ -156,8 +157,6 @@ export async function postToVista(pr, id, { now = Date.now(), session, when = 'n
   const args = { profile_id: v.profile_id, message: posts[0], publish_at: when === 'queue' ? 'queue_available' : 'now', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
   const cz = {};
   if (posts.length > 1) cz.comments = posts.slice(1).map((message) => ({ message }));
-  if (net === 'linkedin') cz.publish_as = 'ARTICLE';      // a text-only LinkedIn post
-  if (Object.keys(cz).length) args.customization = cz;
   let text;
   try {
     const s = session || await VS.session();
@@ -166,6 +165,11 @@ export async function postToVista(pr, id, { now = Date.now(), session, when = 'n
       const qs = (() => { try { return JSON.parse((q.content || []).map((c) => c.text || '').join('')).queues || []; } catch { return []; } })();
       if (!qs.some((x2) => (x2.schedule || []).some((d) => (d.slots || []).length))) return no(`${v.name || 'this profile'} has no posting queue in Vista Social: set its time slots there, or use Post It`);
     }
+    // An attached image goes up to the images repo first (once), and the post carries its public URL.
+    const media = await attachedUrl(pr, x, { ...(upload ? { upload } : {}), ...(render ? { render } : {}) });
+    if (media) args.media_url = [media];
+    if (net === 'linkedin') cz.publish_as = media ? 'IMAGE' : 'ARTICLE';
+    if (Object.keys(cz).length) args.customization = cz;
     const r = await s.call('createOrUpdatePost', args);
     text = (r.content || []).map((c) => c.text || '').join('\n');
     if (r.isError) throw new Error(text.slice(0, 300) || 'Vista Social refused the post');

@@ -475,7 +475,9 @@ function viewStory(main) {
   const arcs = S.arcs.map((a) => ({ ...a, ms: a.moments.map((id) => S.moments.get(id)).filter((m) => m && passMoment(m)) })).filter((a) => a.ms.length).sort((a, b) => a.t0 - b.t0);
   if (!arcs.length) { main.append(h('div', { class: 'empty' }, h('b', {}, 'No story yet'), 'Arcs appear once moments above the score floor link up. Lower “Score ≥” to see more.')); return; }
   const wrap = h('div', { class: 'story' });
-  wrap.append(h('div', { class: 'pager' }, h('a', { class: 'btn', href: '/api/share/story.html', target: '_blank', rel: 'noopener' }, 'Open the redacted, shareable Story ↗')));
+  wrap.append(h('div', { class: 'pager' }, h('a', { class: 'btn', href: '/api/share/story.html', target: '_blank', rel: 'noopener' }, 'Open the redacted, shareable Story ↗'),
+    h('a', { class: 'btn', href: '/api/image?template=poster&fmt=png', title: 'The latest chapter as a movie poster (PNG)' }, 'Movie poster ↓'),
+    h('a', { class: 'btn', href: '/api/image?template=release&fmt=png', title: 'Your releases so far (PNG)' }, 'Release card ↓')));
   arcs.forEach((a, i) => {
     const sidFor = a.ms[0].sid;
     wrap.append(h('section', { class: 'arc' },
@@ -575,6 +577,7 @@ function viewHotspots(main) {
   if (!S.hot) { wrap.append(h('div', { class: 'empty' }, h('b', {}, 'Ranking files…'))); return; }
   const { files, areas, total } = S.hot;
   if (!files.length) { wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No hotspots yet'), 'Files show up here once sessions edit them. They rank higher when tests go red after an edit, or when a fight, a breakage or a correction happens near them.')); return; }
+  wrap.append(h('div', { class: 'pager' }, h('a', { class: 'btn', href: '/api/image?template=boss&fmt=png', title: 'The three hottest files as a boss fight (PNG)' }, 'Boss fight image ↓')));
   const mx = Math.max(1, ...files.map((r) => r.heat), ...areas.map((r) => r.heat));
   const seg = (n, k, label) => n ? h('i', { style: `width:${(100 * n / mx).toFixed(1)}%;background:${k}`, title: label }) : null;
   const bar = (r) => h('div', { class: 'hbar', role: 'img', 'aria-label': `heat ${r.heat}` },
@@ -633,6 +636,34 @@ function postIt(d, bad) {
   if (!as) return h('a', { class: 'mut', href: '#/settings', style: 'font-size:.8rem' }, `Post It: choose a ${chName(d.channel)} profile`);
   return h('button', { class: 'btn postit', disabled: !!S.posting, title: `Approve this exact text and post it to ${chName(d.channel)} as ${as} now, through Vista Social`, onclick: () => sendVista(d, bad, 'now') }, S.posting === d.id ? 'Posting…' : 'Post It!');
 }
+/** Share image on a draft: pick a template (or Surprise me), make it, download it, attach or detach it. */
+function imagePanel(d, canEdit) {
+  const I = S.drafts.images || { templates: [] }, ims = d.images || [];
+  if (!canEdit && d.attached == null) return null;
+  S.imgT = S.imgT || {}; S.imgN = S.imgN || {};
+  const t = S.imgT[d.id] || 'surprise';
+  const shown = S.imgN[d.id] ?? d.attached ?? (ims.length ? ims[ims.length - 1].n : null);
+  const im = ims.find((i) => i.n === shown);
+  const busy = S.imgBusy === d.id;
+  const make = async (template, via) => {
+    S.imgBusy = d.id; S.imgT0 = Date.now(); const tick = setInterval(schedule, 1000); schedule();
+    const r = await dpost({ op: 'image', id: d.id, template, via });
+    clearInterval(tick); S.imgBusy = null;
+    if (r && !r.error) { S.imgN[d.id] = r.n; toast([`Made a ${r.template} image and attached it`, r.note, r.pngError].filter(Boolean).join('. ')); }
+    schedule();
+  };
+  const attached = im && d.attached === im.n;
+  return h('div', { class: 'imgp' },
+    im ? h('a', { href: `/api/draft/image?id=${d.id}&n=${im.n}&fmt=svg`, target: '_blank', rel: 'noopener', class: 'imgprev' + (attached ? ' on' : '') }, h('img', { src: `/api/draft/image?id=${d.id}&n=${im.n}&fmt=svg&v=${im.ts}`, alt: `Share image: ${im.template}`, loading: 'lazy', style: `aspect-ratio:${im.w}/${im.h}` })) : null,
+    ims.length > 1 ? h('div', { class: 'imgs' }, ims.map((i) => h('button', { class: 'tagchip' + (i.n === shown ? ' on' : ''), onclick: () => { S.imgN[d.id] = i.n; schedule(); } }, `${i.n + 1}·${i.template}${d.attached === i.n ? ' ✓' : ''}`))) : null,
+    canEdit ? h('div', { class: 'acts imgacts' },
+      h('select', { 'aria-label': 'Image template', onchange: (e) => { S.imgT[d.id] = e.target.value; e.target.blur(); } }, h('option', { value: 'surprise', selected: t === 'surprise' }, 'Surprise me'), I.templates.map(([k, l]) => h('option', { value: k, selected: t === k }, l))),
+      h('button', { class: 'btn', disabled: !!S.imgBusy, title: 'Draw an image for this post; jokes by your writer when one is set', onclick: () => make(t, compVia()) }, busy ? `Making… ${Math.round((Date.now() - S.imgT0) / 1000)}s` : im ? 'Make another' : 'Create image'),
+      im ? h('button', { class: 'btn', disabled: !!S.imgBusy, title: 'Same template, new jokes', onclick: () => make(im.template, compVia()) }, 'New jokes') : null,
+      im ? h('a', { class: 'btn', href: `/api/draft/image?id=${d.id}&n=${im.n}&fmt=png&download=1` }, 'Download PNG') : null,
+      im ? h('button', { class: 'btn' + (attached ? ' on-ok' : ''), onclick: () => dpost({ op: 'attach', id: d.id, n: attached ? null : im.n }) }, attached ? 'Attached ✓' : 'Attach to post') : null,
+      im && attached && !I.repo ? h('a', { class: 'mut', href: '#/settings', style: 'font-size:.8rem' }, 'set the GitHub repo for images to post it') : null) : null);
+}
 function draftCard(d) {
   const m0 = d.source.moments && S.moments.get(d.source.moments[0]);
   const bad = d.guard && !d.guard.ok;
@@ -659,7 +690,8 @@ function draftCard(d) {
       h('span', { class: 'grow' }), h('span', { class: 'mut' }, ago((Date.now() - d.created_t)) + ' ago' + (d.status === 'pending' ? ` · expires ${fmtD(d.expires_t)}` : ''))),
     m0 ? h('div', { class: 'src' }, 'from ', h('a', { href: `#/story`, onclick: (e) => { e.preventDefault(); S.sel = m0.id; setF({ view: 'story' }); } }, d.source.type === 'arc' ? `arc “${trunc(d.title || m0.headline, 80)}”` : `“${trunc(m0.headline, 90)}”`), m0.tp && m0.tp[0] ? [' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); openTranscript(m0.tp[0].id); } }, 'transcript')] : null) : null,
     editing ? [ta, h('div', { class: 'cc', id: 'cc-' + d.id }, counter(d.text))] : h('div', { class: 'preview' + (canEdit ? ' editable' : ''), 'aria-label': 'Preview exactly as it will be published', title: canEdit ? 'Click to edit' : null, onclick: canEdit ? startEdit : null }, posts),
-    d.card ? h('img', { class: 'card-img', src: `/api/draft/card?id=${d.id}`, alt: 'Share card attached to this draft', loading: 'lazy' }) : null,
+    d.images && d.images.length ? null : d.card && !open ? h('img', { class: 'card-img', src: `/api/draft/card?id=${d.id}`, alt: 'Share card attached to this draft', loading: 'lazy' }) : null,
+    imagePanel(d, open && !S.drafts.private),
     h('div', { class: 'reports' },
       h('div', { class: rcount ? 'rep warn' : 'rep ok' }, rcount ? `Redaction masked ${rcount} item${rcount === 1 ? '' : 's'}: ${d.redaction.summary.map((x) => `${x.rule} ×${x.n}`).join(', ')}` : 'Redaction: nothing needed masking'),
       bad ? h('div', { class: 'rep warn' }, 'Honesty guard: ', d.guard.problems.join(' · ')) : h('div', { class: 'rep ok' }, 'Honesty guard: every number and quote traces to the log')),

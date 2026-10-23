@@ -162,6 +162,18 @@ as a text post). The receipt keeps the Vista post id. Channels without a Vista p
 exact-text approval, no double post), only your own approval counts (never autopilot or an auto rule), the file queue leaves Vista approvals
 alone, and a failed post keeps the approval so Post It can retry.
 
+**Share images.** Every open draft has an image panel: pick a template (Receipt, Release progress, Movie poster, Boss fight) or
+**Surprise me** (it follows the post's angle: a fuckup is a boss fight, the grind a receipt, an irony a poster), then **Create image**. The
+picture is drawn from the log (session hours, prompts and red runs; your releases and their sizes; the arc's moments; your hottest files),
+and the jokes (taglines, fake critics and credits, receipt lines, battle-log quips) are written for that post by your writer, checked like
+a post: any number must be in the data, and every slot must be filled, or the defaults are kept. The new image is attached to the post;
+**New jokes**, **Make another**, **Download PNG** and **Attach / Attached ✓** do what they say. When an attached post goes out through Vista
+Social, the PNG is uploaded once to the GitHub repo in `images.github.repo` (a public repo; `gh` does the upload) and the post carries its
+public link (LinkedIn as an image post). The Story view has **Movie poster ↓** and **Release card ↓**, and Hotspots has **Boss fight image ↓**,
+drawn on the fly. Images show the project's name and repo link (`images.identity`, which the redactor otherwise masks) and `images.handle`.
+The fonts (Anton, Oswald, Playfair Display, JetBrains Mono, Press Start 2P, Inter Tight; SIL Open Font License) ship in `dashboard/fonts/`
+and are embedded in each SVG; PNGs are rendered by a headless Chromium (Playwright's, the system's, or `CTS_CHROMIUM`).
+
 **What "published" means in this version.** Apart from Vista Social, there are no network adapters. Approving writes the exact text to
 `.cts/outbox/<channel>/*.txt` (X, Bluesky, Mastodon, Threads, LinkedIn: you or a scheduler take it from there), to a Markdown file with front
 matter (`blog`, `newsletter`) or to the top of `CHANGELOG.md`. The receipt says so; the dashboard says "queued in the outbox".

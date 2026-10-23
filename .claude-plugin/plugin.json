@@ -1,7 +1,7 @@
 {
   "name": "cts",
   "displayName": "Capture The Struggle",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "description": "Records every Claude Code session as a truthful, attributed event log, scores the moments that matter, and shows them on a live local dashboard.",
   "author": {
     "name": "Dawid Jozwiak",

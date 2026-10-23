@@ -121,6 +121,7 @@ export const DEFAULT_CONFIG = {
     outro: '',                  // text put after every post (a signature); same tags
     modes: {},                  // 'draft' (default) | 'notify' | 'auto', keyed 'kind:channel', 'kind' or 'channel'
   },
+  images: { identity: true, handle: '', github: { repo: '', branch: 'main', dir: '' } }, // share images (src/lib/images.mjs)
   notify: { desktop: true, terminal: true }, // where 'notify'-mode drafts are announced; terminal = a line at session start
   publishing: {
     paused: false,

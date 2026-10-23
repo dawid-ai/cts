@@ -82,7 +82,7 @@ test('no surface opens a non-loopback connection, resolves a hostname, or runs a
     E.prepare(pr);
     pr.close();
     const s = await startServer({ root, port: 0, quiet: true, tickMs: 50, notifySend: () => {} }); stops.push(s.stop);
-    for (const p of ['/api/state', '/api/drafts', '/api/hotspots', '/api/share/story.html', '/api/vista', '/api/tags', '/']) assert.equal((await fetch(`http://127.0.0.1:${s.port}${p}`)).status, 200, p);
+    for (const p of ['/api/state', '/api/drafts', '/api/hotspots', '/api/share/story.html', '/api/vista', '/api/tags', '/api/image?template=boss', '/api/image?template=poster', '/']) assert.equal((await fetch(`http://127.0.0.1:${s.port}${p}`)).status, 200, p);
     assert.equal((await (await fetch(`http://127.0.0.1:${s.port}/api/hotspots`)).json()).files[0].file, 'src/limiter.js');
     await new Promise((r) => setTimeout(r, 200));
   } finally {

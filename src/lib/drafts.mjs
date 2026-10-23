@@ -29,7 +29,7 @@ export class DraftStore {
           redaction: d.redaction || { summary: {}, count: 0 }, card: d.card || null, status: 'pending', created_ts: ev.ts, created_t: t, sid: ev.sid,
           edits: [], approval: null, declined: null, receipts: [], fails: [], origin: d.origin || 'manual', score: d.score || 0, kind: d.kind || null,
           voice_rev: d.voice_rev || null, title: d.title || null, mode: d.mode || 'draft', notify: d.mode === 'notify', notified: null, writer: d.writer || 'template',
-          tone: d.tone || null, quotes: !!d.quotes, angle: d.angle || null, replaces: d.replaces || null, replaced_by: null,
+          tone: d.tone || null, quotes: !!d.quotes, angle: d.angle || null, images: [], attached: null, uploads: {}, replaces: d.replaces || null, replaced_by: null,
         });
         // A rewrite takes the place of the draft it was asked for: that one is closed as replaced (not declined, so no penalty).
         const old = d.replaces && this.drafts.get(d.replaces);
@@ -62,6 +62,10 @@ export class DraftStore {
         break;
       }
       case 'draft.restore': { const x = this.drafts.get(d.draft); if (x && x.status === 'discarded') { x.status = 'pending'; x.approval = null; } break; }
+      // Share images: each made image is kept; at most one is attached; an upload is remembered so a retry reuses its URL.
+      case 'draft.image': { const x = this.drafts.get(d.draft); if (x && !x.images.some((i) => i.n === d.n)) x.images.push({ n: d.n, template: d.template, w: d.w, h: d.h, writer: d.writer || 'template', ts: ev.ts }); break; }
+      case 'draft.attach': { const x = this.drafts.get(d.draft); if (x && (d.n == null || x.images.some((i) => i.n === d.n))) x.attached = d.n ?? null; break; }
+      case 'draft.upload': { const x = this.drafts.get(d.draft); if (x) x.uploads[d.n] = d.url; break; }
       case 'draft.skip': this.skipped.set(`${d.source}|${d.channel}|${d.format}`, d.why || ''); break;
       case 'draft.publish': {
         const x = this.drafts.get(d.draft); if (!x) break;

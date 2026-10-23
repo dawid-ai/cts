@@ -101,7 +101,7 @@ pre.out{margin:6px 0 0;padding:8px;background:var(--sunk);border-radius:8px;font
 .arc ol{list-style:none;margin:0;padding:0 0 0 14px;border-left:2px solid var(--line)}
 .arc li{position:relative;padding:0 0 14px 14px}.arc li:before{content:"";position:absolute;left:-21px;top:6px;width:10px;height:10px;border-radius:50%;background:var(--c);border:2px solid var(--surface)}
 .arc li .card{margin:0;box-shadow:none}
-.pager{display:flex;justify-content:center;margin:12px}
+.pager{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin:12px}
 
 /* Threads */
 .threads{max-width:860px;margin:0 auto}
@@ -208,3 +208,6 @@ mark{background:color-mix(in srgb,var(--human) 28%,transparent);color:inherit;bo
 .vtools ul{margin:6px 0;padding-left:18px;font-size:.85rem}.vtools summary{cursor:pointer;font-size:.85rem}
 .btn.postit{background:var(--k-shipped,#2f8f5b);color:#fff;border-color:transparent;font-weight:700}.btn.postit:hover{opacity:.9}.btn.postit:disabled{opacity:.5}
 .vas{display:flex;flex-direction:column;gap:2px;margin-top:6px}.vrow{margin-top:4px}.vrow .vch{min-width:78px;color:var(--mut);font-size:.85rem}.vrow select{max-width:340px}
+.imgp{display:flex;flex-direction:column;gap:8px;margin-top:8px}.imgprev{display:block;max-width:520px;border-radius:10px;overflow:hidden;border:2px solid transparent}.imgprev.on{border-color:var(--ok)}.imgprev img{display:block;width:100%;height:auto;background:var(--sunk)}
+.imgs{display:flex;flex-wrap:wrap;gap:4px}.tagchip.on{border-color:var(--ink);background:var(--surface)}.imgacts{margin-top:0}.btn.on-ok{border-color:var(--ok);color:var(--ok)}
+a.btn{color:inherit;text-decoration:none;display:inline-flex;align-items:center}

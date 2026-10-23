@@ -131,3 +131,37 @@ test('Approve to the Vista queue: asks for the next free slot, refuses a profile
   assert.ok((await PB.postToVista(pr, bs, { session })).ok, 'Post It still works there');
   pr.close();
 });
+
+test('Post It with an attached image: rendered, uploaded once, sent as media; LinkedIn goes as an image post', async () => {
+  const { Project } = await import('../src/lib/project.mjs');
+  const { paths, serialize } = await import('../src/lib/util.mjs');
+  const N = await import('../src/lib/narrative.mjs');
+  const PB = await import('../src/lib/publish.mjs');
+  const I = await import('../src/lib/images.mjs');
+  const { setVistaProfile } = await import('../src/lib/settings.mjs');
+  const { Sim } = await import('./helpers.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-vi-')); fs.mkdirSync(path.join(root, '.git')); fs.mkdirSync(paths(root).sessions, { recursive: true });
+  fs.writeFileSync(paths(root).config, JSON.stringify({ images: { github: { repo: 'me/cts-images' } } }));
+  const s = new Sim({ start: Date.now() - 3600e3 }); s.start(); s.prompt('add a limiter'); s.adv(1); s.prompt('wait, go back to the old refill logic'); s.stop('ok');
+  fs.writeFileSync(path.join(paths(root).sessions, 's.jsonl'), s.events.map(serialize).join(''));
+  setVistaProfile(root, 'linkedin', { profile_id: 470558, name: 'Dawid' });
+  const pr = Project.open(root);
+  const m = pr.engine.listMoments().find((x) => x.kind === 'reversal');
+  const id = N.createDraft(pr, m.id, { channel: 'linkedin' }).id;
+  await I.createImage(pr, id, { template: 'receipt', render: false });
+  N.approve(pr, id, { to: 'vista' });
+  const uploads = [], renders = [];
+  const render = async (f, w, h) => { renders.push([w, h]); fs.writeFileSync(f.replace(/\.svg$/, '.png'), 'PNG'); return f.replace(/\.svg$/, '.png'); };
+  const upload = async (p, file, name) => { uploads.push(name); assert.equal(fs.readFileSync(file, 'utf8'), 'PNG'); return `https://raw.githubusercontent.com/me/cts-images/main/${name}`; };
+  const calls = [];
+  const session = { call: async (name, args) => { calls.push({ name, args }); if (name === 'createOrUpdatePost' && calls.length === 1) throw new Error('HTTP 500'); return { content: [{ type: 'text', text: '{"id":"p9"}' }] }; } };
+  assert.match((await PB.postToVista(pr, id, { session, upload, render })).reason, /HTTP 500/);
+  const r = await PB.postToVista(pr, id, { session, upload, render });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.deepEqual(renders, [[1200, 675]]); assert.equal(uploads.length, 1, 'uploaded once; the retry reused the URL');
+  assert.match(uploads[0], new RegExp(`^${path.basename(root).toLowerCase().replace(/[^a-z0-9]+/g, '-')}/${id}-0-[0-9a-f]{10}\\.png$`));
+  const post = calls[calls.length - 1].args;
+  assert.deepEqual(post.media_url, [`https://raw.githubusercontent.com/me/cts-images/main/${uploads[0]}`]);
+  assert.deepEqual(post.customization, { publish_as: 'IMAGE' });
+  pr.close();
+});
