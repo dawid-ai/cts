@@ -42,7 +42,8 @@ Written by CTS itself (actor `extractor`, `cts`, `autopilot` or `human`); the en
 | `extract.run` | `{n, rejected}` |
 | `draft.create` | `{draft, source{type,id,moments}, channel, format, text, title, claims{refs,extra}, redaction{count,summary,items}, card, origin, score, kind, mode, voice_rev, writer, tone, quotes, replaces}` (`writer`: `template`, `claude` or `api`; `tone`: `plain`, `story` or `dramatic` for a storyteller draft; `quotes`: it may quote the author's own prompts; `replaces`: the pending or approved draft this rewrite closes, which then reads as `replaced`; `angle`: the storyteller's angle, one of fuckup, lesson, grind, discovery, surprise, irony, decision, argument) |
 | `draft.skip` | `{source, channel, format, why, worth_it}`: the autopilot storyteller passed on this source (`worth_it` false) or its story failed the checks (`worth_it` true); not asked again unless forced |
-| `draft.discard` | `{draft, reason}`: a pending or approved draft thrown away; unlike `draft.decline` it teaches autopilot nothing |
+| `draft.discard` | `{draft, reason}`: a pending or approved draft thrown away (the dashboard's Remove); unlike `draft.decline` it teaches autopilot nothing |
+| `draft.restore` | `{draft}`: a discarded draft back to pending |
 | `draft.edit` | `{draft, text, removed[], redaction}` voids any approval |
 | `draft.approve` | `{draft, via: human\|autopilot, rule?, at?, text_hash}` only valid while `text_hash` matches the current text |
 | `draft.decline` | `{draft, reason}` |

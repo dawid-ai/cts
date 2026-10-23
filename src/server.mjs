@@ -16,6 +16,8 @@ import { postsOf } from './lib/drafts.mjs';
 import { notifyDrafts } from './lib/notify.mjs';
 import { companionData } from './lib/companion.mjs';
 import { getSettings, applySettings } from './lib/settings.mjs';
+import { TAGS, tagValues } from './lib/tags.mjs';
+import * as VS from './lib/vista.mjs';
 import { AutoExtractor } from './lib/autoextract.mjs';
 import { trim } from './lib/retention.mjs';
 import { register, listProjects, projectSummaries } from './lib/registry.mjs';
@@ -167,6 +169,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         switch (b.op) {
           case 'create': { const via = b.via || pr.cfg.drafts.writer, o = { channel: b.channel, format: b.format || undefined, force: !!b.force, replace: b.replace || undefined }; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { ...o, via, ask: storyAsk, tone: b.tone, quotes: b.quotes == null ? undefined : !!b.quotes }) : N.draftPlain(pr, b.source, o); break; }
           case 'discard': r = N.discard(pr, b.id, b.reason || ''); break;
+          case 'restore': r = N.restore(pr, b.id); break;
           case 'discard-pending': { const ids = pr.engine.drafts.list().filter((x) => x.status === 'pending' || x.status === 'expired').map((x) => x.id); for (const id of ids) N.discard(pr, id, b.reason || 'cleared'); r = { ok: true, discarded: ids.length }; break; }
           case 'approve': r = N.approve(pr, b.id, { at: b.at || undefined }); if (!r.error) { const pub = PB.publishDraft(pr, b.id); r.published = pub.ok ? pub.receipt : null; r.held = pub.ok ? null : pub.reason; } break;
           case 'edit': r = N.edit(pr, b.id, b.text); break;
@@ -182,6 +185,31 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         return json(res, r.error ? 409 : 200, r);
       }
       if (url.pathname === '/api/settings' && req.method === 'GET') return json(res, 200, getSettings(root));
+      // Vista Social: status never shows a credential; connecting and listing reach the network only when asked.
+      const guarded = () => req.headers['x-cts'] === '1' && (!req.headers.origin || new URL(req.headers.origin).host === req.headers.host);
+      if (url.pathname === '/api/vista' && req.method === 'GET') return json(res, 200, VS.status());
+      if (url.pathname === '/api/vista' && req.method === 'POST') {
+        if (!guarded()) return json(res, 403, { error: 'forbidden' });
+        const b = await body(req);
+        try {
+          if (b.op === 'connect') return json(res, 200, { url: await VS.beginOAuth(`http://localhost:${actual}/oauth/vista/callback`) });
+          if (b.op === 'link') { const r = VS.setLink(b.url); return json(res, r.error ? 400 : 200, r.error ? r : VS.status()); }
+          if (b.op === 'disconnect') { VS.disconnect(); return json(res, 200, VS.status()); }
+          if (b.op === 'tools') { const s = await VS.session(); return json(res, 200, { tools: (await s.tools()).map((t) => ({ name: t.name, description: t.description || '' })) }); }
+          return json(res, 400, { error: 'unknown Vista Social operation' });
+        } catch (e) { return json(res, 502, { error: String(e.message || e) }); }
+      }
+      if (url.pathname === '/oauth/vista/callback') {
+        const page = (msg) => { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(`<!doctype html><meta charset="utf-8"><title>CTS · Vista Social</title><body style="font:16px system-ui;margin:3rem;max-width:40rem"><p>${msg.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p><p><a href="/#/settings">Back to CTS settings</a></p>`); };
+        const q = url.searchParams;
+        if (q.get('error')) return page(`Vista Social did not connect: ${q.get('error_description') || q.get('error')}`);
+        try { await VS.finishOAuth(q.get('state') || '', q.get('code') || ''); return page('Vista Social is connected. You can close this tab.'); } catch (e) { return page(String(e.message || e)); }
+      }
+      if (url.pathname === '/api/tags') {
+        pr.sync();
+        const sid = [...pr.engine.sessions.values()].filter((s) => !s.demo && s.end).sort((a, b) => b.end - a.end)[0];
+        return json(res, 200, { tags: TAGS, values: tagValues(pr, { sid: sid && sid.sid, angle: 'irony', kind: 'shipped' }) });
+      }
       if (url.pathname === '/api/settings' && req.method === 'POST') {
         const origin = req.headers.origin;
         if (req.headers['x-cts'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) return json(res, 403, { error: 'forbidden' });

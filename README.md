@@ -138,7 +138,22 @@ The gate: nothing is published without a recorded `draft.approve` for the exact 
 stops everything including scheduled posts; each channel has a daily cap; a declined source is never re-drafted unless you pass `--force`;
 declining a kind raises that kind's autopilot bar by 5 points (max 20); pending drafts expire after `drafts.expireDays` (7).
 
-**What "published" means in this version.** There are no network adapters yet. Approving writes the exact text to
+**Editing and removing.** Click a draft's text to edit it in place (Ctrl+Enter saves, Esc cancels; the character count updates as you
+type, and an edit voids an earlier approval). **Remove** throws a draft away without teaching autopilot anything; it moves to the closed list,
+where **Restore** brings it back.
+
+**Intro and signature.** Settings, Intro and signature: text put before and after every post (the first and last post of a thread; dev-log
+lines get neither), with tags filled in when the draft is made: `{project_lines}` `{project_files}` `{project_commits}` `{project_days}`
+`{version}` `{session_minutes}` `{session_hours}` `{session_prompts}` `{session_tool_calls}` `{session_edits}` `{session_red_runs}`
+`{session_commits}` `{session_lines}` `{session_agents}` `{session_moments}` `{model}` `{total_sessions}` `{total_moments}` `{total_prompts}`
+`{streak_days}` `{date}` `{weekday}` `{angle}` `{kind}`. The session is the one the post is about. Click a tag to insert it; the preview fills
+it from your latest session. The storyteller is told to leave room for both, and their numbers count as traceable.
+
+**Vista Social.** Settings, Vista Social: **Connect Vista Social** signs in with OAuth (the callback is the local dashboard), or save a key
+link (https, vistasocial.com). The credentials stay in `~/.cts/vista.json` (mode 600), never in the log; `cts vista status|tools|link|disconnect`
+does the same from a terminal. `src/lib/vista.mjs` is CTS's only network code, and it runs only when you connect, list tools, or post.
+
+**What "published" means in this version.** Apart from Vista Social, there are no network adapters. Approving writes the exact text to
 `.cts/outbox/<channel>/*.txt` (X, Bluesky, Mastodon, Threads, LinkedIn: you or a scheduler take it from there), to a Markdown file with front
 matter (`blog`, `newsletter`) or to the top of `CHANGELOG.md`. The receipt says so; the dashboard says "queued in the outbox".
 Edits you make are offered to the voice profile once each (shorter than before: `x.max`; the same word deleted from two drafts: `never`);

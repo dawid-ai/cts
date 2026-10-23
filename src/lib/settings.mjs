@@ -25,6 +25,8 @@ export const FIELDS = [
   { path: 'drafts.model', section: 'Autopilot', label: 'Storyteller model', type: 'text', max: 100 },
   { path: 'drafts.tone', section: 'Autopilot', label: 'Storyteller tone', type: 'enum', options: ['wry', 'dramatic', 'straight'], dflt: 'wry', help: 'wry = dry, slightly sarcastic dev humor; dramatic = a hook, tension and a turn; straight = sincere, no jokes. Every tone finds one angle first and only uses facts from the log.' },
   { path: 'drafts.quotes', section: 'Autopilot', label: 'Let the storyteller quote my own words', type: 'bool', help: 'Up to 2 short quotes per post, exact words from your own prompts, after redaction and consent. Never agent text, commands, paths or errors.' },
+  { path: 'drafts.intro', section: 'Intro and signature', label: 'Before every post', type: 'longtext', max: 1000, tags: true, help: 'Optional. Put at the top of every post (the first post of a thread). Tags such as {session_hours} are filled in when the draft is made.' },
+  { path: 'drafts.outro', section: 'Intro and signature', label: 'After every post', type: 'longtext', max: 1000, tags: true, help: 'Optional signature, at the end of every post (the last post of a thread). Dev-log lines get neither.' },
   { path: 'drafts.expireDays', section: 'Autopilot', label: 'Pending drafts expire after (days)', type: 'int', min: 1, max: 90 },
   ...CHANNELS.flatMap((c) => [
     { path: `publishing.channels.${c}.cap`, section: 'Channels', label: `${c}: daily cap`, type: 'int', min: 0, max: 50 },
@@ -84,6 +86,7 @@ export function coerce(f, v) {
     case 'bool': return typeof v === 'boolean' ? [v] : bad('must be on or off');
     case 'enum': { const x = v === false ? 'off' : String(v); return f.options.includes(x) ? [x === 'off' ? false : x] : bad(`must be one of ${f.options.join(', ')}`); }
     case 'text': return typeof v === 'string' && v.trim() && v.length <= (f.max || 500) ? [v.trim()] : bad('must be non-empty text');
+    case 'longtext': return typeof v === 'string' && v.length <= (f.max || 1000) ? [v.replace(/\r\n/g, '\n').trim()] : bad(`must be text under ${f.max || 1000} characters`);
     case 'time': return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v)) ? [String(v)] : bad('must be HH:MM');
     case 'list': {
       const xs = (Array.isArray(v) ? v : String(v).split(/[\n,]/)).map((s) => String(s).trim()).filter(Boolean);

@@ -150,7 +150,10 @@ dialog table{border-collapse:collapse;width:100%}dialog td{padding:3px 8px 3px 0
 .tag{font:600 .7rem var(--mono);border:1px solid var(--line2);border-radius:999px;padding:1px 8px;color:var(--mut)}
 .badge{font:700 .7rem var(--mono);border-radius:6px;padding:1px 7px;background:var(--sunk)}.b-approved{color:var(--focus)}.b-published{color:var(--ok)}.b-declined,.b-expired{color:var(--mut)}
 .draft .src{font-size:.85rem;color:var(--mut);margin-bottom:8px}.draft .src a{color:inherit}
-.preview{display:flex;flex-direction:column;gap:8px}
+.preview{display:flex;flex-direction:column;gap:8px}.preview.editable{cursor:text;border-radius:10px}.preview.editable:hover .post{outline:1px dashed var(--line2)}
+.draft textarea.inedit{font-size:.95rem;line-height:1.5;min-height:120px}
+.tagtext{display:flex;flex-direction:column;gap:6px;min-width:0}.tprev{font-size:.8rem;white-space:pre-wrap}.tprev span{color:var(--ink)}
+.tagchips{display:flex;flex-wrap:wrap;gap:4px}.tagchip{font:.7rem var(--mono);border:1px solid var(--line2);background:var(--sunk);border-radius:6px;padding:1px 6px}.tagchip:hover{border-color:var(--ink)}
 .post{position:relative;background:var(--sunk);border:1px solid var(--line);border-radius:10px;padding:10px 12px 22px}
 .post .pt{white-space:pre-wrap;word-break:break-word}.post .pn{font:.7rem var(--mono);color:var(--mut);margin-bottom:4px}
 .post .cc{position:absolute;right:10px;bottom:4px;font:.7rem var(--mono);color:var(--mut)}.post .cc.over{color:var(--bad);font-weight:700}
@@ -201,3 +204,5 @@ mark{background:color-mix(in srgb,var(--human) 28%,transparent);color:inherit;bo
 .hot{--churn:color-mix(in srgb,var(--mut) 55%,transparent)}.hnote{font-size:.78rem;margin-top:4px}
 .hlegend{font-size:.8rem;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center}.hlegend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 @media (max-width:640px){.hrow{grid-template-columns:1fr}}
+.vista .acts input{flex:1;min-width:200px;font:inherit;font-size:.85rem;background:var(--surface);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:4px 8px}
+.vtools ul{margin:6px 0;padding-left:18px;font-size:.85rem}.vtools summary{cursor:pointer;font-size:.85rem}

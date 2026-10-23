@@ -11,6 +11,7 @@ import { summarize } from './summary.mjs';
 import { loadVoice, suggestionId } from './voice.mjs';
 import { textHash, postsOf, POST_SEP } from './drafts.mjs';
 import { consentMoment, consentText, consentEvent } from './consent.mjs';
+import { tagValues, fillTags } from './tags.mjs';
 
 const MIN = 60000, DAY = 86400000;
 export const SOCIAL = ['x', 'bluesky', 'mastodon', 'threads'];
@@ -232,6 +233,36 @@ function gate(pr, id, { channel, format, force, replace }) {
   return { src, format, old };
 }
 
+// The intro and signature from settings (drafts.intro / drafts.outro), with {tags} filled from the log and the repo.
+// Dev-log lines get neither. Their numbers are added to the draft's traceable numbers: they come from CTS, not the story.
+const SEP = '\n\n';
+function decoration(pr, src, format, { angle = '', kind } = {}) {
+  const D = pr.cfg.drafts;
+  if (format === 'devlog' || (!D.intro && !D.outro)) return null;
+  const top = src.type === 'arc' ? src.ms.slice().sort((a, b) => b.score - a.score)[0] : src.m;
+  const vals = tagValues(pr, { sid: top.sid, angle, kind: kind || top.kind });
+  const intro = fillTags(D.intro, vals).trim(), outro = fillTags(D.outro, vals).trim();
+  return { intro, outro, nums: [...`${intro} ${outro}`.matchAll(/\d+/g)].map((m) => +m[0]) };
+}
+/** Characters a story must leave free for the intro and signature (the angle is not known yet: the longest one is assumed). */
+const reserveFor = (pr, src, format) => {
+  const d = decoration(pr, src, format, { angle: 'discovery' });
+  if (!d) return 0;
+  const n = (s) => (s ? s.length + SEP.length : 0);
+  return format === 'thread' ? Math.max(n(d.intro), n(d.outro)) : format === 'long' ? 0 : n(d.intro) + n(d.outro);
+};
+function decorate(text, format, d) {
+  if (!d) return text;
+  if (format === 'thread') {
+    const ps = postsOf(text);
+    if (d.intro) ps[0] = ps[0].replace(/^(\d+\/\d+ )?/, (m) => m + d.intro + SEP);
+    if (d.outro) ps[ps.length - 1] += SEP + d.outro;
+    return ps.join(POST_SEP);
+  }
+  if (format === 'long') { const fm = (/^---\n[\s\S]*?\n---\n/.exec(text) || [''])[0]; return fm + [d.intro, text.slice(fm.length).trim(), d.outro].filter(Boolean).join(SEP) + '\n'; }
+  return [d.intro, text, d.outro].filter(Boolean).join(SEP);
+}
+
 /** Create one draft (as a draft.create event). `story` is a storyteller text that already passed storyProblems. */
 export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', force = false, mode, story, replace, extraNums = [] } = {}) {
   const g = gate(pr, id, { channel, format, force, replace });
@@ -240,7 +271,9 @@ export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', 
   const c = compose(pr, src, channel, format);
   if (!c) return { error: 'nothing to say about this one' };
   const opts = redactOpts(pr);
-  const st = story && { ...story, text: redact(story.text, opts).text, title: redact(story.title, opts).text };
+  const deco = decoration(pr, src, format, { angle: story && story.angle });
+  const st = story && { ...story, text: redact(decorate(story.text, format, deco), opts).text, title: redact(story.title, opts).text };
+  if (!st && deco) c.text = decorate(c.text, format, deco);
   const last = redact(st ? st.text : c.text, opts);
   const red = { report: [...(st ? [] : c.report), ...last.report] };
   const draft = ulid();
@@ -249,7 +282,7 @@ export function createDraft(pr, id, { channel = 'x', format, origin = 'manual', 
   const sid = top.sid;
   writeHumanEvent(pr.root, 'draft.create', {
     draft, source: { type: src.type, id: src.id, moments: src.ms.map((m) => m.id) }, channel, format, text: st ? st.text : c.text, title: st ? st.title : c.title,
-    claims: { refs: st ? st.refs : c.refs, extra: [...new Set([...c.extra, ...extraNums])] }, redaction: { count: red.report.length, summary: Object.entries(red.report.reduce((a, r) => (a[r.rule] = (a[r.rule] || 0) + 1, a), {})).map(([rule, n]) => ({ rule, n })), items: red.report.slice(0, 20) },
+    claims: { refs: st ? st.refs : c.refs, extra: [...new Set([...c.extra, ...extraNums, ...(deco ? deco.nums : [])])] }, redaction: { count: red.report.length, summary: Object.entries(red.report.reduce((a, r) => (a[r.rule] = (a[r.rule] || 0) + 1, a), {})).map(([rule, n]) => ({ rule, n })), items: red.report.slice(0, 20) },
     card, origin, score: top.score, kind: top.kind, voice_rev: c.voiceRev, mode: mode || modeFor(pr, top.kind, channel), writer: st ? st.writer : 'template',
     tone: st ? st.tone : null, quotes: st ? !!st.quotes : false, angle: st ? st.angle || null : null, replaces: g.old ? g.old.id : null,
   }, { sid, actor: 'cts' });
@@ -333,7 +366,7 @@ function factsOf(pr, m, prev) {
 /** The packet a storyteller reads: per moment, the prompts before it, its own events and what the agents said right after. */
 export function storyPacket(pr, src, c, channel, format, { tone = 'wry', quotes = false } = {}) {
   const voice = loadVoice(pr.root), v = voice.for(channel);
-  const limit = Math.min(v.max || Infinity, ((pr.cfg.publishing.channels || {})[channel] || {}).limit || Infinity);
+  const limit = Math.min(v.max || Infinity, ((pr.cfg.publishing.channels || {})[channel] || {}).limit || Infinity) - reserveFor(pr, src, format);
   const seen = new Set();
   const once = (e) => e && !seen.has(e.id) && seen.add(e.id);
   let prev = null;
@@ -529,6 +562,14 @@ export function discard(pr, id, reason = '') {
   if (!x) return { error: 'no such draft' };
   if (!['pending', 'approved'].includes(x.status)) return { error: `draft is ${x.status}` };
   writeHumanEvent(pr.root, 'draft.discard', { draft: x.id, reason: trunc(reason, 300) }, { sid: x.sid, actor: 'human' });
+  pr.sync();
+  return { id: x.id };
+}
+export function restore(pr, id) {
+  const x = pr.engine.drafts.get(id);
+  if (!x) return { error: 'no such draft' };
+  if (x.status !== 'discarded') return { error: `draft is ${x.status}` };
+  writeHumanEvent(pr.root, 'draft.restore', { draft: x.id }, { sid: x.sid, actor: 'human' });
   pr.sync();
   return { id: x.id };
 }

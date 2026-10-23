@@ -61,6 +61,7 @@ export class DraftStore {
         x.status = 'discarded'; x.approval = null;
         break;
       }
+      case 'draft.restore': { const x = this.drafts.get(d.draft); if (x && x.status === 'discarded') { x.status = 'pending'; x.approval = null; } break; }
       case 'draft.skip': this.skipped.set(`${d.source}|${d.channel}|${d.format}`, d.why || ''); break;
       case 'draft.publish': {
         const x = this.drafts.get(d.draft); if (!x) break;

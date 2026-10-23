@@ -431,3 +431,37 @@ test('discard throws a draft away without teaching autopilot: no decline, no rai
   pr.close();
   const again = Project.open(root); assert.equal(again.engine.drafts.get(a).status, 'discarded'); again.close();
 });
+
+test('intro and signature: tags are filled from the log and the repo, the story leaves room for them, and their numbers pass the guard', async () => {
+  const { root, pr } = setup({ drafts: { intro: 'Day {streak_days} of agents.', outro: '{session_prompts} prompts, {session_red_runs} red runs, {project_lines} lines. {nope}' } });
+  fs.writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\n');
+  const { execFileSync } = await import('node:child_process');
+  fs.rmSync(path.join(root, '.git'), { recursive: true });
+  execFileSync('git', ['init', '-q'], { cwd: root }); execFileSync('git', ['add', 'a.txt'], { cwd: root });
+  const { tagValues, fillTags, TAGS } = await import('../src/lib/tags.mjs');
+  const m = momentOf(pr, 'fight');
+  const v = tagValues(pr, { sid: m.sid });
+  assert.equal(v.project_lines, 3); assert.equal(v.project_files, 1); assert.equal(v.session_prompts, 2); assert.equal(v.session_red_runs, 4);
+  assert.equal(v.streak_days, 1); assert.ok(TAGS.every(([k]) => k in v), 'every listed tag has a value');
+  assert.equal(fillTags('{session_prompts} and {nope}', v), '2 and {nope}', 'an unknown tag stays visible');
+  let seen;
+  const r = await N.writeStory(pr, m.id, { channel: 'x', ask: async (s, u) => { seen = JSON.parse(u); return JSON.stringify({ worth_it: true, angle: 'grind', title: 't', text: 'The limiter failed until it did not.' }); } });
+  const d = pr.engine.drafts.get(r.id);
+  assert.equal(d.text, 'Day 1 of agents.\n\nThe limiter failed until it did not.\n\n2 prompts, 4 red runs, 3 lines. {nope}');
+  assert.equal(seen.max_characters, 280 - (16 + 2) - (38 + 2), "the story is told to leave room for both");
+  assert.deepEqual(N.checkDraft(pr, d).problems, [], 'the signature numbers trace');
+  const th = pr.engine.drafts.get((await N.writeStory(pr, 'arc:' + pr.engine.arcs().find((a) => a.moments.length > 1).id, { channel: 'x', format: 'thread', ask: async () => JSON.stringify({ worth_it: true, angle: 'grind', title: 't', text: 'It failed.\n---\nThen it passed.' }) })).id);
+  assert.match(th.text, /^1\/2 Day 1 of agents\.\n\nIt failed\.[\s\S]*2\/2 Then it passed\.\n\n2 prompts/);
+  const dl = pr.engine.drafts.get(N.createDraft(pr, m.id, { channel: 'changelog' }).id);
+  assert.doesNotMatch(dl.text, /Day 1|prompts,/, 'dev-log lines get neither');
+  pr.close();
+});
+
+test('remove and restore: a removed draft is discarded and can come back as pending', () => {
+  const { pr } = setup();
+  const id = N.createDraft(pr, momentOf(pr, 'fight').id, { channel: 'x' }).id;
+  N.discard(pr, id, 'removed'); assert.equal(pr.engine.drafts.get(id).status, 'discarded');
+  assert.ok(N.restore(pr, id).id); assert.equal(pr.engine.drafts.get(id).status, 'pending');
+  assert.match(N.restore(pr, id).error, /pending/);
+  pr.close();
+});

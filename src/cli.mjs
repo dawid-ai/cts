@@ -22,6 +22,7 @@ usage: cts <command> [options]      (in Claude Code: /cts:<command>)
   confirm <moment-id>            confirm a moment
   threads [close <id>]           list open threads with age, or close one
   hotspots [--limit N] [--json]  files and areas ranked by trouble across all sessions
+  vista [status|tools|link <url>|disconnect]   the Vista Social connection used by Post It
   extract [status|prepare|apply|run]  Tier 2 extraction (see cts extract --help)
   draft [moment|arc:<id>|last|auto]  draft posts into the review queue (--channel x --format thread --force)
   queue [list|show|approve|decline|edit|publish] <id>   the review queue; nothing publishes without approval
@@ -49,6 +50,7 @@ Every command accepts --help.`,
   open: 'cts open [--no-browser]\n  Start the dashboard server if it is not running and open it (default port 4848, +1 until free).',
   status: 'cts status\n  Server state, event count, open threads and the last moment.',
   threads: 'cts threads [close <id-prefix>]\n  List open threads with their age. "close" forces one closed.',
+  vista: 'cts vista [status|tools [--json]|link <url>|disconnect]\n  The Vista Social connection behind the dashboard\'s Post It button. Connect with OAuth from Settings, or save a key link\n  (https, vistasocial.com). Credentials stay in ~/.cts/vista.json (mode 600), never in the log. tools lists what the account offers.',
   hotspots: 'cts hotspots [--limit N] [--json]\n  Files and areas ranked across all sessions by struggle and correction moments near them, red test runs after editing\n  them, and edits and commits (shell edits included). The dashboard\'s Hotspots view shows the same ranking.',
   digest: 'cts digest [today|week|session] [--extract|--no-extract]\n  Run extraction first (when "extraction.auto" is set, or with --extract), then print the digest and write it to .cts/digests/.',
   pause: 'cts pause\n  Stop capturing events. Nothing from the paused span is stored.',
@@ -217,6 +219,19 @@ export async function main(argv) {
       out(open.length ? `${open.length} open thread${open.length === 1 ? '' : 's'}:` : 'no open threads');
       for (const t of open.slice().reverse()) out(`  ${String(ago(Date.now() - t.opened_t)).padStart(4)}  ${t.kind.padEnd(10)} ${t.text}   [${t.opened_by}] ${t.id.slice(-8)}`);
       pr.close(); return;
+    }
+    case 'vista': {
+      const VS = await import('./lib/vista.mjs');
+      const sub = args.shift() || 'status';
+      if (sub === 'status') { const s = VS.status(); return out(s.connected ? `connected (${s.method}) since ${s.since}` : 'not connected: connect from the dashboard (Settings, Vista Social) or cts vista link <url>'); }
+      if (sub === 'link') { const r = VS.setLink(args[0] || ''); if (r.error) process.exitCode = 1; return out(r.error || 'saved; the link is stored in ~/.cts/vista.json (mode 600), never in the log'); }
+      if (sub === 'disconnect') { VS.disconnect(); return out('disconnected'); }
+      if (sub === 'tools') {
+        const s = await VS.session(); const ts = await s.tools();
+        if (flag(args, '--json')) return out(JSON.stringify(ts, null, 1));
+        return out(ts.map((t) => `${t.name}  ${trunc(String(t.description || '').replace(/\s+/g, ' '), 100)}`).join('\n'));
+      }
+      return out(HELP.vista);
     }
     case 'hotspots': {
       const { hotspotText } = await import('./lib/summary.mjs');

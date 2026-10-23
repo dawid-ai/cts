@@ -117,6 +117,8 @@ export const DEFAULT_CONFIG = {
     model: 'claude-sonnet-5-5', // the storyteller's model (Haiku invents lessons and asides more often)
     tone: 'wry',                // the storyteller's voice: 'wry' | 'dramatic' | 'straight'
     quotes: false,              // let the storyteller quote my own prompt words (short, exact, redacted)
+    intro: '',                  // text put before every post; {tags} are filled from the log (src/lib/tags.mjs)
+    outro: '',                  // text put after every post (a signature); same tags
     modes: {},                  // 'draft' (default) | 'notify' | 'auto', keyed 'kind:channel', 'kind' or 'channel'
   },
   notify: { desktop: true, terminal: true }, // where 'notify'-mode drafts are announced; terminal = a line at session start

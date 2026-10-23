@@ -604,6 +604,7 @@ async function dpost(body) {
     return r;
   } catch (e) { toast((e.body && e.body.error) || e.message); return null; }
 }
+const postsOfText = (t) => String(t).split(/\n\s*---\s*\n/).map((x) => x.trim()).filter(Boolean);
 const maskedText = (t) => { const out = []; let last = 0; for (const m of t.matchAll(/\[(?:redacted|repo|masked|email|path|host|url|internal-url|ip)\]/g)) { out.push(t.slice(last, m.index), h('mark', { title: 'masked by the redactor' }, m[0])); last = m.index + m[0].length; } out.push(t.slice(last)); return out; };
 function draftCard(d) {
   const m0 = d.source.moments && S.moments.get(d.source.moments[0]);
@@ -613,7 +614,14 @@ function draftCard(d) {
   const posts = d.posts.map((p, i) => h('div', { class: 'post' }, d.posts.length > 1 ? h('div', { class: 'pn' }, `post ${i + 1} of ${d.posts.length}`) : null, h('div', { class: 'pt' }, maskedText(p.text)), d.limit ? h('div', { class: 'cc' + (p.chars > d.limit ? ' over' : '') }, `${p.chars}/${d.limit}`) : h('div', { class: 'cc' }, `${p.chars} chars`)));
   const rcount = d.redaction ? d.redaction.count : 0;
   let when;
-  const ta = editing ? h('textarea', { id: 'ed-' + d.id, rows: Math.min(18, 3 + d.text.split('\n').length), 'aria-label': 'Edit draft text' }, d.text) : null;
+  const canEdit = open && !S.drafts.private;
+  const startEdit = () => { S.editing = d.id; schedule(); setTimeout(() => { const t = $('#ed-' + d.id); if (t) { t.focus(); t.setSelectionRange(t.value.length, t.value.length); } }, 30); };
+  const saveEdit = async () => { const r = await dpost({ op: 'edit', id: d.id, text: $('#ed-' + d.id).value }); S.editing = null; if (document.activeElement) document.activeElement.blur(); if (r && r.suggestions && r.suggestions.length) toast('Voice suggestion waiting in Voice profile'); else if (r) toast('Saved'); schedule(); };
+  const partsOf = (v) => (d.format === 'thread' ? postsOfText(v) : [v.trim()]);
+  const counter = (v) => partsOf(v).map((p) => `${p.length}${d.limit ? '/' + d.limit : ''}`).join(' · ') + (partsOf(v).length > 1 ? ' (posts)' : ' chars');
+  const ta = editing ? h('textarea', { id: 'ed-' + d.id, class: 'inedit', rows: Math.min(24, 2 + Math.ceil(d.text.length / 80) + d.text.split('\n').length), 'aria-label': 'Edit draft text',
+    oninput: (e) => { const c = $('#cc-' + d.id); if (c) { c.textContent = counter(e.target.value); c.classList.toggle('over', !!d.limit && partsOf(e.target.value).some((p) => p.length > d.limit)); } },
+    onkeydown: (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); saveEdit(); } if (e.key === 'Escape') { S.editing = null; e.target.blur(); schedule(); } } }, d.text) : null;
   const dec = S.declining === d.id ? h('input', { id: 'dr-' + d.id, placeholder: 'Why? (optional, feeds the drafter)', 'aria-label': 'Reason for declining', onkeydown: (e) => { if (e.key === 'Enter') { dpost({ op: 'decline', id: d.id, reason: e.target.value }); S.declining = null; } if (e.key === 'Escape') { S.declining = null; schedule(); } } }) : null;
   const busy = S.comp.busyOn === d.id;
   return h('article', { class: 'draft st-' + d.status + (S.comp.last === d.id ? ' new' : ''), style: `--c:var(--k-${d.kind || 'mark'})`, 'data-id': d.id, 'data-kind': 'd' },
@@ -623,7 +631,7 @@ function draftCard(d) {
       h('span', { class: 'tag', title: d.writer === 'template' ? 'Written from plain templates' : 'Told by the storyteller model' }, d.writer === 'template' ? 'template' : [d.angle, d.tone, d.quotes ? 'my words' : null].filter(Boolean).join(' · ') || d.writer),
       h('span', { class: 'grow' }), h('span', { class: 'mut' }, ago((Date.now() - d.created_t)) + ' ago' + (d.status === 'pending' ? ` · expires ${fmtD(d.expires_t)}` : ''))),
     m0 ? h('div', { class: 'src' }, 'from ', h('a', { href: `#/story`, onclick: (e) => { e.preventDefault(); S.sel = m0.id; setF({ view: 'story' }); } }, d.source.type === 'arc' ? `arc “${trunc(d.title || m0.headline, 80)}”` : `“${trunc(m0.headline, 90)}”`), m0.tp && m0.tp[0] ? [' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); openTranscript(m0.tp[0].id); } }, 'transcript')] : null) : null,
-    editing ? ta : h('div', { class: 'preview', 'aria-label': 'Preview exactly as it will be published' }, posts),
+    editing ? [ta, h('div', { class: 'cc', id: 'cc-' + d.id }, counter(d.text))] : h('div', { class: 'preview' + (canEdit ? ' editable' : ''), 'aria-label': 'Preview exactly as it will be published', title: canEdit ? 'Click to edit' : null, onclick: canEdit ? startEdit : null }, posts),
     d.card ? h('img', { class: 'card-img', src: `/api/draft/card?id=${d.id}`, alt: 'Share card attached to this draft', loading: 'lazy' }) : null,
     h('div', { class: 'reports' },
       h('div', { class: rcount ? 'rep warn' : 'rep ok' }, rcount ? `Redaction masked ${rcount} item${rcount === 1 ? '' : 's'}: ${d.redaction.summary.map((x) => `${x.rule} ×${x.n}`).join(', ')}` : 'Redaction: nothing needed masking'),
@@ -631,13 +639,14 @@ function draftCard(d) {
     d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`).join(' · ')) : null,
     d.status === 'declined' && d.declined.reason ? h('div', { class: 'mut' }, `Declined: ${d.declined.reason}`) : null,
     d.status === 'replaced' ? h('div', { class: 'mut' }, 'Replaced by a rewrite') : null,
-    d.status === 'discarded' ? h('div', { class: 'mut' }, 'Discarded') : null,
+    d.status === 'discarded' ? h('div', { class: 'acts' }, h('span', { class: 'mut' }, 'Removed'), h('button', { class: 'btn', onclick: () => dpost({ op: 'restore', id: d.id }) }, 'Restore')) : null,
     d.status === 'approved' && d.approval ? h('div', { class: 'mut' }, d.approval.at ? `Approved, goes out at ${fmtDT(Date.parse(d.approval.at))}` : 'Approved, waiting for the publish queue') : null,
     open && !S.drafts.private ? h('footer', { class: 'acts' },
-      editing ? [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'edit', id: d.id, text: $('#ed-' + d.id).value }); S.editing = null; if (r && r.suggestions && r.suggestions.length) toast('Voice suggestion waiting below'); schedule(); } }, 'Save edit'), h('button', { class: 'btn', onclick: () => { S.editing = null; schedule(); } }, 'Cancel')]
+      editing ? [h('button', { class: 'btn prim', onmousedown: (e) => e.preventDefault(), onclick: saveEdit }, 'Save', h('kbd', {}, 'Ctrl+Enter')), h('button', { class: 'btn', onmousedown: (e) => e.preventDefault(), onclick: () => { S.editing = null; schedule(); } }, 'Cancel', h('kbd', {}, 'Esc'))]
         : [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'approve', id: d.id }); if (r && r.held) toast('Approved. Held: ' + r.held); else if (r && r.published) toast('Published'); } }, bad ? 'Approve anyway' : 'Approve'),
           h('label', { class: 'sched' }, 'or at ', h('input', { type: 'datetime-local', 'aria-label': 'Publish at', onchange: (e) => { if (e.target.value) dpost({ op: 'approve', id: d.id, at: new Date(e.target.value).toISOString() }); } })),
-          h('button', { class: 'btn', onclick: () => { S.editing = d.id; schedule(); setTimeout(() => { const t = $('#ed-' + d.id); if (t) t.focus(); }, 30); } }, 'Edit'),
+          h('button', { class: 'btn', onclick: startEdit }, 'Edit'),
+          h('button', { class: 'btn', title: 'Remove this draft. Unlike Decline, it teaches autopilot nothing; you can restore it from the closed list.', onclick: async () => { const r = await dpost({ op: 'discard', id: d.id, reason: 'removed' }); if (r) toast('Removed. Restore it from the closed list below.'); } }, 'Remove'),
           dec || h('button', { class: 'btn', onclick: () => { S.declining = d.id; schedule(); setTimeout(() => { const t = $('#dr-' + d.id); if (t) t.focus(); }, 30); } }, 'Decline'),
           h('span', { class: 'rw' }, busy ? `Rewriting… ${Math.round((Date.now() - S.comp.t0) / 1000)}s` : ['Rewrite:', ...TONES.map(([tn]) => h('button', { class: 'btn', disabled: !!S.comp.busyOn, title: `Tell it again in the ${tn} tone with ${writerName(compVia())}`, onclick: () => writePost({ source: d.source.id, channel: d.channel, format: d.format, via: compVia(), tone: tn, quotes: compQuotes(), replace: d.id }, d.id) }, tn))])]) : null);
 }
@@ -743,7 +752,18 @@ function viewDrafts(main) {
 }
 
 // ---------- Settings ----------
-async function loadSettings() { try { S.settings = await api('/api/settings'); S.sChanges = {}; schedule(); } catch (e) { toast('Settings failed to load: ' + e.message); } }
+async function loadSettings() { try { S.settings = await api('/api/settings'); S.sChanges = {}; schedule(); api('/api/tags').then((x) => { S.tags = x; schedule(); }).catch(() => {}); } catch (e) { toast('Settings failed to load: ' + e.message); } }
+const fillTagsUI = (t, vals) => String(t || '').replace(/\{([a-z_]+)\}/g, (m, k) => (vals[k] === undefined || vals[k] === '' ? m : String(vals[k])));
+/** A textarea for text with {tags}: click a tag to insert it at the cursor; the preview shows it filled from your latest session. */
+function tagText(f, id, v, put) {
+  const prev = h('div', { class: 'tprev mut' });
+  const show = (x) => { prev.replaceChildren(...(x ? ['Preview: ', h('span', {}, S.tags ? fillTagsUI(x, S.tags.values) : x)] : [])); };
+  const ta = h('textarea', { id, rows: 2, placeholder: f.path.endsWith('intro') ? 'e.g. Day {streak_days} of building with agents.' : 'e.g. {session_hours} h, {session_prompts} prompts, {session_red_runs} red runs. Built with CTS.', oninput: (e) => show(e.target.value), onchange: (e) => put(e.target.value) }, v || '');
+  show(v);
+  const chips = S.tags ? h('div', { class: 'tagchips' }, S.tags.tags.map(([k, help]) => h('button', { class: 'tagchip', type: 'button', title: `${help}: now ${S.tags.values[k] === undefined || S.tags.values[k] === '' ? 'empty' : S.tags.values[k]}`, onmousedown: (e) => e.preventDefault(),
+    onclick: () => { const a = ta.selectionStart ?? ta.value.length, b = ta.selectionEnd ?? a; ta.value = ta.value.slice(0, a) + `{${k}}` + ta.value.slice(b); ta.focus(); ta.setSelectionRange(a + k.length + 2, a + k.length + 2); show(ta.value); S.sChanges[f.path] = ta.value; } }, k))) : null;
+  return h('div', { class: 'tagtext' }, ta, prev, chips);
+}
 function settingInput(f) {
   const id = 'set-' + f.path.replace(/\W/g, '-');
   const changed = Object.prototype.hasOwnProperty.call(S.sChanges, f.path);
@@ -755,6 +775,7 @@ function settingInput(f) {
   else if (f.type === 'enum') input = h('select', { id, onchange: (e) => put(e.target.value) }, f.options.map((o) => h('option', { value: o, selected: o === v }, o)));
   else if (f.type === 'time') input = h('input', { id, type: 'time', value: v || '', onchange: (e) => put(e.target.value || null) });
   else if (f.type === 'text') input = h('input', { id, type: 'text', value: v || '', onchange: (e) => put(e.target.value) });
+  else if (f.type === 'longtext') input = tagText(f, id, v, put);
   else if (f.type === 'list') input = h('textarea', { id, rows: Math.max(2, Math.min(6, (Array.isArray(v) ? v.length : 1) + 1)), onchange: (e) => put(e.target.value) }, (Array.isArray(v) ? v : String(v || '').split(/[\n,]/)).filter(Boolean).join('\n'));
   else if (f.type === 'modes') input = h('textarea', { id, rows: 3, placeholder: 'shipped:x = notify', onchange: (e) => put(e.target.value) }, typeof v === 'string' ? v : Object.entries(v || {}).map(([k, m]) => `${k} = ${m}`).join('\n'));
   else if (f.type === 'set') {
@@ -775,6 +796,26 @@ async function saveSettings() {
     await loadState();
   } catch (e) { toast(e.body && e.body.errors ? e.body.errors.join(' · ') : 'Save failed: ' + e.message); }
 }
+// ---------- Vista Social ----------
+async function vpost(body) {
+  try { return await api('/api/vista', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify(body) }); } catch (e) { toast((e.body && e.body.error) || e.message); return null; }
+}
+const loadVista = () => api('/api/vista').then((v) => { const was = S.vista && S.vista.connected; S.vista = v; if (v.connected && !was && S.vistaWait) { S.vistaWait = false; toast('Vista Social connected'); } schedule(); }).catch(() => {});
+function vistaBox() {
+  const V = S.vista;
+  if (!V) { loadVista(); return h('section', { class: 'sbox' }, h('h3', {}, 'Vista Social'), h('div', { class: 'mut' }, 'Loading…')); }
+  if (S.vistaWait && !V.connected && !S.vistaPoll) S.vistaPoll = setTimeout(() => { S.vistaPoll = null; loadVista(); }, 2500);
+  const connect = async () => { const r = await vpost({ op: 'connect' }); if (r && r.url) { S.vistaWait = true; window.open(r.url, '_blank', 'noopener'); schedule(); } };
+  return h('section', { class: 'sbox vista' }, h('h3', {}, 'Vista Social'),
+    h('div', { class: 'mut' }, 'Connect your Vista Social account for posting drafts to X. Posting happens only when you press a button on a draft, never on its own. Credentials stay in ~/.cts/vista.json on this machine, never in the log.'),
+    V.connected ? h('div', { class: 'acts' }, h('span', { class: 'rep ok' }, `Connected (${V.method === 'link' ? 'key link' : 'OAuth'})${V.since ? ' since ' + fmtD(Date.parse(V.since)) : ''}`),
+      h('button', { class: 'btn', onclick: async () => { const r = await vpost({ op: 'tools' }); if (r) { S.vistaTools = r.tools; schedule(); } } }, 'Show what it can do'),
+      h('button', { class: 'btn', onclick: async () => { if (confirm('Disconnect Vista Social? The stored credentials are deleted.')) { S.vista = await vpost({ op: 'disconnect' }); S.vistaTools = null; schedule(); } } }, 'Disconnect'))
+      : h('div', { class: 'acts' }, h('button', { class: 'btn prim', onclick: connect }, 'Connect Vista Social'), S.vistaWait ? h('span', { class: 'mut' }, 'Finish signing in in the tab that opened…') : null,
+        h('span', { class: 'mut' }, 'or a key link:'), h('input', { id: 'vlink', type: 'text', placeholder: 'https://mcp.vistasocial.com/…', 'aria-label': 'Vista Social key link' }),
+        h('button', { class: 'btn', onclick: async () => { const v = $('#vlink').value; const r = await vpost({ op: 'link', url: v }); if (r) { S.vista = r; toast('Saved'); schedule(); } } }, 'Save link')),
+    S.vistaTools ? h('details', { class: 'vtools' }, h('summary', {}, `${S.vistaTools.length} tools on your account`), h('ul', {}, S.vistaTools.map((t) => h('li', {}, h('code', {}, t.name), ' ', h('span', { class: 'mut' }, trunc(t.description, 140)))))) : null);
+}
 function viewSettings(main) {
   if (!S.settings) { main.append(h('div', { class: 'empty' }, h('b', {}, 'Loading settings…'))); if (!S.settingsLoading) { S.settingsLoading = true; loadSettings().finally(() => { S.settingsLoading = false; }); } return; }
   const n = Object.keys(S.sChanges).length;
@@ -783,6 +824,7 @@ function viewSettings(main) {
       h('div', {}, h('h2', { class: 'sec', style: 'margin:0' }, 'Settings'), h('div', { class: 'mut' }, 'Saved to ', h('code', {}, S.settings.file), '. Other keys in that file are kept. Saving rescores the project from the log.')),
       h('div', { class: 'acts' }, n ? h('button', { class: 'btn', onclick: () => { S.sChanges = {}; schedule(); } }, 'Discard') : null,
         h('button', { class: 'btn prim', disabled: !n, onclick: saveSettings }, n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'No changes'))));
+  wrap.append(vistaBox());
   for (const sec of [...new Set(S.settings.fields.map((f) => f.section))]) {
     const fold = sec === 'Detector weights' || sec === 'Channels';
     wrap.append(h(fold ? 'details' : 'section', { class: 'sbox' }, h(fold ? 'summary' : 'h3', {}, sec), ...S.settings.fields.filter((f) => f.section === sec).map(settingInput)));
