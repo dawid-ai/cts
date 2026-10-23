@@ -306,7 +306,7 @@ test('recurring from prompts: the same problem opening a later session, but not 
   });
   const rec = r.moments.filter((m) => m.kind === 'recurring');
   assert.deepEqual(rec.map((m) => [m.sid, m.evidence.via, m.evidence.sessions, m.score]), [['c', 'prompt', 1, 55], ['d', 'prompt', 2, 65]]);
-  assert.match(rec[0].headline, /^Back with the same problem: “A process crashed/);
+  assert.match(rec[0].headline, /^Back with the same problem \(wireplumber, sigsegv\): “A process crashed on this machine and I want to know why\.”, also in 1 earlier session$/);
   assert.deepEqual(rec[0].actors, ['human']);
   // A habitual opener is not a problem, and only a session's first prompt is a fingerprint.
   const opener = 'resume the work from handover.md, read the checklist, then pick the next unchecked item and build it';
@@ -354,9 +354,9 @@ test('hotspots: files ranked by struggles, corrections, red runs after an edit a
     s.call('Edit', { file_path: '/work/app/src/lib/limiter.js' }); s.call('Edit', { file_path: '/work/app/src/lib/clock.js' }); s.adv(1);
     for (let i = 0; i < 3; i++) { s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.adv(2); }
     s.bash('npm test', { out: JEST_GREEN }); s.adv(1);
-    s.call('Edit', { file_path: '/work/app/README.md' }); s.adv(60);
-    s.call('Edit', { file_path: '/work/app/README.md' }); s.adv(1);
-    s.prompt('no, don\'t touch the readme'); s.adv(60 * 24);
+    s.call('Edit', { file_path: '/work/app/theme.css' }); s.adv(60);
+    s.call('Edit', { file_path: '/work/app/theme.css' }); s.call('Edit', { file_path: '/work/app/README.md' }); s.adv(1);
+    s.prompt('no, don\'t touch the theme'); s.adv(60 * 24);
     s.sid = 'b'; s.start(); s.call('Edit', { file_path: '/work/app/src/lib/limiter.js', old_string: 'x' }, { ok: false }); s.adv(60 * 24);
     s.sid = 'c'; s.demo = true; s.start(); s.call('Edit', { file_path: '/work/app/demo.js' }); s.demo = false;
     s.sid = 'd'; s.start(); s.bash('cd src && sed -i \'s/a/b/\' ../README.md lib/clock.js && npm test 2>&1 | tee /tmp/t.log');
@@ -364,11 +364,13 @@ test('hotspots: files ranked by struggles, corrections, red runs after an edit a
   });
   const H = eng.hotspots('/work/app');
   const row = (f) => H.files.find((r) => r.file === f);
-  assert.deepEqual(H.files.map((r) => r.file), ['src/lib/limiter.js', 'src/lib/clock.js', 'README.md']);
+  assert.deepEqual(H.files.map((r) => r.file), ['src/lib/limiter.js', 'src/lib/clock.js', 'theme.css', 'README.md']);
   assert.deepEqual([row('src/lib/limiter.js').struggles, row('src/lib/limiter.js').fails, row('src/lib/limiter.js').edits, row('src/lib/limiter.js').sessions], [1, 4, 1, 2]);
+  assert.deepEqual([row('theme.css').corrections, row('theme.css').edits], [1, 2]);
   // Shell writes count as edits (relative to their `cd`, temp files left out); one commit seen in two sessions counts once.
-  assert.deepEqual([row('README.md').corrections, row('README.md').struggles, row('README.md').edits, row('README.md').commits], [1, 0, 3, 1]);
-  assert.deepEqual([row('src/lib/clock.js').edits, H.total], [2, 3]);
+  // Docs and config never take the blame for a nearby moment or red run.
+  assert.deepEqual([row('README.md').corrections, row('README.md').struggles, row('README.md').edits, row('README.md').commits], [0, 0, 2, 1]);
+  assert.deepEqual([row('src/lib/clock.js').edits, H.total], [2, 4]);
   const lib = H.areas.find((a) => a.area === 'src/lib');
   assert.deepEqual([lib.files, lib.struggles, H.areas[H.areas.length - 1].area], [2, 1, '(top level)']);
   // Trimmed sessions keep their counts through the snapshot, without double counting the sessions that replay.

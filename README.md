@@ -141,7 +141,7 @@ are waiting. Turn either off with `"notify": { "desktop": false, "terminal": fal
 
 ## Commands
 
-In Claude Code they are namespaced: `/cts:mark`, `/cts:open`, `/cts:threads`, `/cts:digest`, `/cts:dismiss`, `/cts:status`,
+In Claude Code they are namespaced: `/cts:mark`, `/cts:open`, `/cts:threads`, `/cts:hotspots`, `/cts:digest`, `/cts:dismiss`, `/cts:status`,
 `/cts:pause`, `/cts:resume`, `/cts:share`, `/cts:init`, `/cts:extract`, `/cts:draft`, `/cts:queue`, `/cts:voice`. The same commands exist as `cts <command>` and all take `--help`.
 `cts doctor`, `cts reindex`, `cts trim`, `cts consent`, `cts export`, `cts import git`, `cts statusline`, `cts watch`, `cts serve` are CLI-only.
 
@@ -159,7 +159,7 @@ The plugin does set the **subagent status line** (its `settings.json`): each sub
 **Companion pane**: `cts watch` in a terminal split next to Claude Code shows the last five moments, open threads, drafts to review
 and what each actor is doing, redrawn on every event. `cts watch --once` prints it once without the server.
 
-**MCP**: the plugin registers a stdio server exposing `cts_moments`, `cts_threads`, `cts_search`, `cts_mark` and a read-only `cts_drafts` (there is deliberately no tool that approves or publishes), so you can ask
+**MCP**: the plugin registers a stdio server exposing `cts_moments`, `cts_threads`, `cts_search`, `cts_hotspots`, `cts_mark` and a read-only `cts_drafts` (there is deliberately no tool that approves or publishes), so you can ask
 "what did we leave undecided?" in plain language.
 
 ## Dashboard

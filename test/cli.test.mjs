@@ -19,7 +19,7 @@ const write = (root, sim) => { const p = paths(root); fs.mkdirSync(p.sessions, {
 test('every command prints help with --help and exits 0; bare `cts` prints usage', () => {
   const root = proj();
   assert.match(cts(root).stdout, /usage: cts/);
-  for (const c of ['init', 'open', 'status', 'mark', 'dismiss', 'confirm', 'threads', 'digest', 'pause', 'resume', 'reindex', 'share', 'export', 'import', 'demo', 'statusline', 'subagent-statusline', 'watch', 'trim', 'consent', 'doctor', 'serve', 'draft', 'queue', 'voice', 'extract']) {
+  for (const c of ['init', 'open', 'status', 'mark', 'dismiss', 'confirm', 'threads', 'digest', 'pause', 'resume', 'reindex', 'share', 'export', 'import', 'demo', 'statusline', 'subagent-statusline', 'watch', 'trim', 'hotspots', 'consent', 'doctor', 'serve', 'draft', 'queue', 'voice', 'extract']) {
     const r = cts(root, c, '--help');
     assert.equal(r.status, 0, c); assert.ok(r.stdout.trim().length > 10, c);
   }
@@ -94,16 +94,18 @@ test('MCP: Claude can answer "what is still undecided?" with the same answer the
     { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'cts_mark', arguments: { note: 'chose sqlite', thread: false } } },
     { jsonrpc: '2.0', id: 5, method: 'tools/call', params: { name: 'cts_moments', arguments: { min_score: 0 } } },
     { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'cts_search', arguments: { query: 'flat file' } } },
+    { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'cts_hotspots', arguments: {} } },
   ];
   const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'mcp.mjs')], { input: msgs.map((m) => JSON.stringify(m)).join('\n') + '\n', env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: 'utf8' });
   const out = Object.fromEntries(r.stdout.trim().split('\n').map((l) => JSON.parse(l)).map((o) => [o.id, o]));
   assert.equal(out[1].result.serverInfo.name, 'cts');
-  assert.deepEqual(out[2].result.tools.map((t) => t.name), ['cts_moments', 'cts_threads', 'cts_search', 'cts_mark', 'cts_drafts']);
+  assert.deepEqual(out[2].result.tools.map((t) => t.name), ['cts_moments', 'cts_threads', 'cts_search', 'cts_mark', 'cts_hotspots', 'cts_drafts']);
   const pr = Project.open(root);
   assert.ok(out[3].result.content[0].text.includes(pr.engine.openThreads()[0].text));
   assert.match(out[4].result.content[0].text, /Marked/);
   assert.match(out[5].result.content[0].text, /mark/);
   assert.match(out[6].result.content[0].text, /flat file/);
+  assert.match(out[7].result.content[0].text, /No hotspots yet/);
   pr.close();
 });
 
@@ -158,7 +160,8 @@ test('demo loads, produces every headline detector, and clears', () => {
   assert.match(cts(root, 'demo').stdout, /loaded/);
   const pr = Project.open(root);
   const kinds = new Set(pr.engine.listMoments().map((m) => m.kind));
-  for (const k of ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'refusal', 'memory-cut', 'escalation']) assert.ok(kinds.has(k), k);
+  for (const k of ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'refusal', 'memory-cut', 'escalation', 'detour']) assert.ok(kinds.has(k), k);
+  assert.equal(pr.engine.hotspots(root).files[0].file, 'src/limiter.js', 'with only the demo, hotspots show the demo');
   assert.ok(pr.engine.openThreads().length >= 1);
   assert.equal(pr.engine.sessionList().length, 2);
   pr.close();

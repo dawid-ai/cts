@@ -46,6 +46,8 @@ export function buildDemo(now = Date.now()) {
   s.bash('npm test', { out: 'Tests: 14 passed, 14 total' }); s.adv(4);
   s.call('Edit', { file_path: 'src/routes/login.js' }, { dur: 0.3 }); s.adv(0.5);
   s.bash('npm test', { ok: false, out: 'FAIL test/login.test.js\nTests: 2 failed, 12 passed, 14 total' }); s.adv(2);
+  // The login failure was a stale session cache: a side quest outside the limiter.
+  s.call('Edit', { file_path: 'src/session/store.js' }, { dur: 0.4 }); s.adv(0.5); s.call('Edit', { file_path: 'src/session/cache.js' }, { dur: 0.3 }); s.adv(1);
   s.prompt('fix login.test.js, then commit'); s.adv(0.6);
   s.call('Edit', { file_path: 'src/routes/login.js' }); s.bash('npm test', { out: 'Tests: 14 passed, 14 total' }); s.adv(1);
   s.stop('Token bucket is in with a rollback path. I used an in-memory store for now; revisit Redis in limiter.js once load tests exist.'); s.adv(0.8);

@@ -43,3 +43,13 @@ export function slim(ev) {
   delete d.summary;
   return { id: ev.id, sid: ev.sid, seq: ev.seq ?? ev._seq, ts: ev.ts, t: ev.t ?? ev._t ?? Date.parse(ev.ts), kind: ev.kind, actor: ev.actor, agent_type: ev.agent_type || null, prompt_id: ev.prompt_id, d, tp: !!ev.tp, sum: summarize(ev) };
 }
+
+/** Hotspots as text (CLI and MCP): the hottest areas, then files, each with what made it hot. */
+export function hotspotText(H, { limit = 10 } = {}) {
+  if (!H.files.length) return 'No hotspots yet: files show up once sessions edit them.';
+  const why = (r) => [[r.struggles, 'struggle'], [r.corrections, 'correction'], [r.fails, 'red run'], [r.edits, 'edit'], [r.commits, 'commit']].filter(([n]) => n).map(([n, w]) => `${n} ${w}${n === 1 ? '' : 's'}`).join(', ');
+  const row = (name, r) => `  ${String(r.heat).padStart(4)}  ${trunc(name, 56).padEnd(56)}  ${why(r)} · ${r.sessions} session${r.sessions === 1 ? '' : 's'}`;
+  return [`Hottest areas (heat = 3 per struggle or correction, 1 per red run after an edit, 1 per 5 edits or commits):`,
+    ...H.areas.slice(0, Math.min(limit, 8)).map((a) => row(`${a.area} (${a.files} file${a.files === 1 ? '' : 's'})`, a)),
+    `Hottest files (${Math.min(limit, H.files.length)} of ${H.total}):`, ...H.files.slice(0, limit).map((r) => row(r.file, r))].join('\n');
+}

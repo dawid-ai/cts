@@ -6,6 +6,7 @@ import { Project } from './lib/project.mjs';
 import { findRoot, trunc, ago } from './lib/util.mjs';
 import { writeHumanEvent } from './lib/log.mjs';
 import { evidenceLine } from './lib/share.mjs';
+import { hotspotText } from './lib/summary.mjs';
 
 const VERSION = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
 
@@ -14,6 +15,7 @@ const TOOLS = [
   { name: 'cts_threads', description: 'List open (or closed) decision threads: unanswered questions and hedged decisions such as "for now" or "revisit". Answers "what is still undecided?".', inputSchema: { type: 'object', properties: { status: { type: 'string', enum: ['open', 'closed', 'all'] } } } },
   { name: 'cts_search', description: 'Search prompts, commands, commit messages and moment headlines in the project log.', inputSchema: { type: 'object', properties: { query: { type: 'string' }, limit: { type: 'number' } }, required: ['query'] } },
   { name: 'cts_mark', description: 'Flag the current moment (score 100). With thread=true, open an undecided thread instead, e.g. after making a hedged decision.', inputSchema: { type: 'object', properties: { note: { type: 'string' }, thread: { type: 'boolean' } } } },
+  { name: 'cts_hotspots', description: 'Files and areas of the project ranked by trouble across all sessions: struggle and correction moments near them, red test runs after editing them, edits and commits. Answers "where does work keep going wrong?".', inputSchema: { type: 'object', properties: { limit: { type: 'number' } } } },
   { name: 'cts_drafts', description: 'List drafted posts waiting in the review queue (read-only). Approving, editing and declining are done by the human in the dashboard or with `cts queue`; there is deliberately no tool for that.', inputSchema: { type: 'object', properties: { status: { type: 'string', description: 'pending (default), approved, published, declined, expired' } } } },
 ];
 
@@ -45,6 +47,10 @@ export function makeHandler(root) {
       pr.sync();
       const l = pr.engine.drafts.list({ status: a.status || 'pending' });
       return l.length ? l.map((x) => `- ${x.id.slice(-8)} · ${x.channel}/${x.format} · ${x.kind || ''} · ${trunc(x.text.replace(/\s+/g, ' '), 100)}`).join('\n') : `No ${a.status || 'pending'} drafts.`;
+    },
+    cts_hotspots: (a) => {
+      pr.sync();
+      return hotspotText(pr.engine.hotspots(root, { limit: a.limit || 10 }), { limit: a.limit || 10 });
     },
     cts_mark: (a) => {
       writeHumanEvent(root, 'mark', { note: a.note || '', flag: a.thread ? '?' : null }, { actor: 'main' });

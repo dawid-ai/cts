@@ -21,6 +21,7 @@ usage: cts <command> [options]      (in Claude Code: /cts:<command>)
   dismiss                        dismiss the latest auto-detected moment (lowers that detector's weight)
   confirm <moment-id>            confirm a moment
   threads [close <id>]           list open threads with age, or close one
+  hotspots [--limit N] [--json]  files and areas ranked by trouble across all sessions
   extract [status|prepare|apply|run]  Tier 2 extraction (see cts extract --help)
   draft [moment|arc:<id>|last|auto]  draft posts into the review queue (--channel x --format thread --force)
   queue [list|show|approve|decline|edit|publish] <id>   the review queue; nothing publishes without approval
@@ -48,6 +49,7 @@ Every command accepts --help.`,
   open: 'cts open [--no-browser]\n  Start the dashboard server if it is not running and open it (default port 4848, +1 until free).',
   status: 'cts status\n  Server state, event count, open threads and the last moment.',
   threads: 'cts threads [close <id-prefix>]\n  List open threads with their age. "close" forces one closed.',
+  hotspots: 'cts hotspots [--limit N] [--json]\n  Files and areas ranked across all sessions by struggle and correction moments near them, red test runs after editing\n  them, and edits and commits (shell edits included). The dashboard\'s Hotspots view shows the same ranking.',
   digest: 'cts digest [today|week|session] [--extract|--no-extract]\n  Run extraction first (when "extraction.auto" is set, or with --extract), then print the digest and write it to .cts/digests/.',
   pause: 'cts pause\n  Stop capturing events. Nothing from the paused span is stored.',
   resume: 'cts resume\n  Resume capture.',
@@ -214,6 +216,14 @@ export async function main(argv) {
       const open = pr.engine.openThreads();
       out(open.length ? `${open.length} open thread${open.length === 1 ? '' : 's'}:` : 'no open threads');
       for (const t of open.slice().reverse()) out(`  ${String(ago(Date.now() - t.opened_t)).padStart(4)}  ${t.kind.padEnd(10)} ${t.text}   [${t.opened_by}] ${t.id.slice(-8)}`);
+      pr.close(); return;
+    }
+    case 'hotspots': {
+      const { hotspotText } = await import('./lib/summary.mjs');
+      const json = flag(args, '--json'), limit = +(opt(args, '--limit') || 10);
+      const pr = await project(root);
+      const H = pr.engine.hotspots(root, { limit: Math.max(limit, 1) });
+      out(json ? JSON.stringify(H, null, 2) : hotspotText(H, { limit }));
       pr.close(); return;
     }
     case 'digest': {

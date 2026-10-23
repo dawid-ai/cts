@@ -11,8 +11,10 @@ const MIN = 60000;
 const DAY = 86400000;
 const HUMAN = new Set(['mark', 'confirm', 'dismiss', 'rescore', 'merge', 'thread.close']);
 // A shell command's relative path joined to the event's cwd, with `.` and `..` resolved.
-// Files that ride along with any change (tests, docs, config, dotfiles): never the start of a side quest.
-const COMPANION = /(?:^|\/)(?:tests?|__tests__|spec|docs?|\.[^/]+)\/|\.(?:test|spec)\.\w+$|\.(?:md|mdx|txt|rst|json|lock|ya?ml|toml|ini|cfg|conf)$|(?:^|\/)\.[^/]*$/i;
+// Docs, config and dotfiles: changed alongside everything, so a nearby failure or moment is never theirs.
+const DOCCONF = /(?:^|\/)(?:docs?|\.[^/]+)\/|\.(?:md|mdx|txt|rst|json|lock|ya?ml|toml|ini|cfg|conf)$|(?:^|\/)\.[^/]*$/i;
+// Those plus tests: files that ride along with any change, never the start of a side quest.
+const COMPANION = new RegExp(`${DOCCONF.source}|(?:^|\\/)(?:tests?|__tests__|spec)\\/|\\.(?:test|spec)\\.\\w+$`, 'i');
 const absPath = (cwd, f) => {
   if (/^(?:\/|~|[A-Za-z]:)/.test(f) || !cwd) return f;
   const out = [];
@@ -390,7 +392,7 @@ export class Engine {
    * that the prompt does not name. Two edits there make the moment, once per turn. Companion files never count.
    */
   detourCheck(S, ev, f) {
-    const T = S.turn, cwd = String(ev.cwd || '').replace(/\\/g, '/').replace(/\/$/, ''), x = String(f).replace(/\\/g, '/');
+    const T = S.turn, cwd = String(ev.cwd || '').replace(/\\/g, '/').replace(/\/$/, ''), x = absPath(cwd, String(f).replace(/\\/g, '/'));
     if (!T || T.done || !cwd || !x.startsWith(cwd + '/')) return;
     const rel = x.slice(cwd.length + 1), parts = rel.split('/');
     if (COMPANION.test(rel)) return;
@@ -399,7 +401,8 @@ export class Engine {
     const words = [...area.split(/[/_.-]/), ...parts[parts.length - 1].replace(/\.\w+$/, '').split(/[_.-]/)].map((w) => w.toLowerCase()).filter((w) => w.length >= 3);
     if (T.areas.has(area) || words.some((w) => T.topics.has(w)) || T.topics.has(parts[parts.length - 1].toLowerCase())) return;
     const o = T.off.get(area) || { evs: [], files: new Set(), abs: new Set() };
-    o.evs.push(ev); o.files.add(rel); o.abs.add(x); T.off.set(area, o);
+    // `abs` keeps each path as the session touched it, so hotspots and arcs match it with the other moments.
+    o.evs.push(ev); o.files.add(rel); o.abs.add(f); T.off.set(area, o);
     if (o.evs.length < 2) return;
     T.done = true;
     const from = [...T.areas].map((a) => a || 'the top level'), to = area || 'the top level', r = T.red;
@@ -411,14 +414,13 @@ export class Engine {
     });
   }
   /** Files written in this session in the 30 minutes before `t`, newest first (at most 8). */
-  nearFiles(S, t) { return [...S.touched].filter(([, w]) => w <= t && t - w <= 30 * MIN).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f]) => f); }
+  nearFiles(S, t) { return [...S.touched].filter(([f, w]) => w <= t && t - w <= 30 * MIN && !DOCCONF.test(f.replace(/\\/g, '/'))).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f]) => f); }
   /**
    * Per file: `s` is {sid: [edits, failures, last time]}, kept per session so a retention snapshot carries trimmed sessions
    * without double counting the ones that replay; `c` is {commit sha: time}, so a commit seen twice counts once.
    */
   fileStat(S, f, k, t, sha) {
-    if (S.demo) return;
-    const all = (this.files ||= new Map()), r = all.get(f) || { s: {}, c: {} };
+    const all = S.demo ? (this.demoFiles ||= new Map()) : (this.files ||= new Map()), r = all.get(f) || { s: {}, c: {} };
     if (sha) r.c[sha] = t;
     else { const c = (r.s[S.sid] ||= [0, 0, 0]); c[k]++; c[2] = Math.max(c[2], t); }
     all.delete(f); all.set(f, r);
@@ -426,15 +428,17 @@ export class Engine {
   }
   /** Files and areas ranked by trouble across all sessions: struggle and correction moments, red runs after editing, then edits. Paths under `root` are made relative. */
   hotspots(root = '', { limit = 40 } = {}) {
+    // The demo session stands in only while there is no real data, as everywhere else on a fresh install.
+    const demo = !(this.files && this.files.size) && !!(this.demoFiles && this.demoFiles.size);
     const rel = (f) => { const x = String(f).replace(/\\/g, '/'), r = String(root).replace(/\\/g, '/').replace(/\/$/, ''); return r && x.startsWith(r + '/') ? x.slice(r.length + 1) : x; };
     const rows = new Map(), row = (f) => { const k = rel(f); let r = rows.get(k); if (!r) rows.set(k, r = { file: k, edits: 0, commits: 0, fails: 0, struggles: 0, corrections: 0, sessions: new Set(), last: 0, moments: [], kinds: new Map() }); return r; };
-    for (const [f, { s, c }] of this.files || []) {
+    for (const [f, { s, c }] of (demo ? this.demoFiles : this.files) || []) {
       const r = row(f);
       for (const [sid, [e, x, t]] of Object.entries(s)) { r.edits += e; r.fails += x; r.sessions.add(sid); r.last = Math.max(r.last, t); }
       for (const t of Object.values(c)) { r.commits++; r.last = Math.max(r.last, t); }
     }
     for (const m of this.moments.values()) {
-      const k = m.demo || m.status === 'dismissed' ? null : STRUGGLE.has(m.kind) ? 'struggles' : CORRECTION.has(m.kind) ? 'corrections' : null;
+      const k = !m.demo !== !demo || m.status === 'dismissed' ? null : STRUGGLE.has(m.kind) ? 'struggles' : CORRECTION.has(m.kind) ? 'corrections' : null;
       if (k) for (const f of new Set((m.files.length ? m.files : m.near || []).map(rel))) { const r = row(f); r[k]++; r.sessions.add(m.sid); r.last = Math.max(r.last, m.t1); r.moments.push(m.id); r.kinds.set(m.id, k); }
     }
     const heat = (r) => 3 * (r.struggles + r.corrections) + r.fails + Math.round((r.edits + r.commits) / 5);
@@ -524,13 +528,21 @@ export class Engine {
     for (const e of errors) see(`${pre}err:${e}`, e, 'error');
     if (ask) {
       // Prompts rarely repeat word for word: match earlier first prompts by topic overlap (sameAsk), keyed by their topic list.
-      const p = `${pre}ask:`, also = [];
-      for (const [k, v] of hist) if (k.startsWith(p) && sameAsk(ask.topics, k.slice(p.length).split(' '))) also.push(v);
-      see(p + ask.topics.join(' '), trunc(ask.text.trim().split('\n')[0], 90), 'prompt', also);
+      const p = `${pre}ask:`, also = [], df = new Map();
+      let asks = 0;
+      for (const [k, v] of hist) {
+        if (!k.startsWith(p)) continue;
+        const words = k.slice(p.length).split(' ');
+        asks++; for (const w of words) df.set(w, (df.get(w) || 0) + 1);
+        if (sameAsk(ask.topics, words)) also.push(v);
+      }
+      // The subject: this prompt's words that other first prompts lack (a template's shared text names nothing).
+      const subject = ask.topics.filter((w) => (df.get(w) || 0) < asks).sort((a, b) => df.get(a) - df.get(b)).slice(0, 2);
+      see(p + ask.topics.join(' '), `${subject.length ? ` (${subject.join(', ')})` : ''}: “${trunc(ask.text.trim().split('\n')[0], 90)}”`, 'prompt', also);
     }
     if (!hits.length) return;
     const where = `also in ${n} earlier session${n === 1 ? '' : 's'}`;
-    const headline = via === 'prompt' ? `Back with the same problem: “${hits[0]}”, ${where}` : `${via === 'error' ? 'Same error again' : 'Failing again'}: ${trunc(hits[0], 70)}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}, ${where}`;
+    const headline = via === 'prompt' ? `Back with the same problem${hits[0]}, ${where}` : `${via === 'error' ? 'Same error again' : 'Failing again'}: ${trunc(hits[0], 70)}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}, ${where}`;
     const what = via === 'prompt' ? 'You opened a session with this problem' : via === 'error' ? `${hits.length === 1 ? 'This error' : 'These errors'} showed up` : `${hits.length === 1 ? 'This test' : 'These tests'} failed`;
     this.emit(S, 'recurring', [ev], {
       base: Math.min(85, BASE.recurring + 10 * (n - 1)), headline, actors: via === 'prompt' ? ['human'] : undefined, who: via === 'prompt' ? ev.d.who : undefined,
