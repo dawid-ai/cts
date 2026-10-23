@@ -70,7 +70,8 @@ function storyLines(pr, m) {
     case 'memory-cut': { const n = (E.files || []).length; return [n ? `After the context was compacted, the agent re-read ${plural(n, 'file')} it had already seen.` : 'After the context was compacted, the agent re-read files it had already seen.']; }
     case 'escalation': return ['I switched models to get unstuck.'];
     case 'misread': return [E.after_confident ? 'The agent said it was done, but it had answered a different question than the one I asked.' : 'The agent took my request the wrong way, and I had to spell out what I actually meant.'];
-    case 'frustration': return [E.after_confident ? 'It was supposed to be done, and it still was not doing what I needed. I was losing patience.' : 'I was losing patience: it still was not doing what I needed.'];
+    case 'frustration': if (E.repeat_of) return [E.after_confident ? 'It said it was done, and I had to ask for the same thing again.' : 'I had to ask for the same thing again.'];
+      return [E.after_confident ? 'It was supposed to be done, and it still was not doing what I needed. I was losing patience.' : 'I was losing patience: it still was not doing what I needed.'];
     case 'recurring': { const n = E.sessions, when = n ? `in ${plural(n, 'earlier session')}` : 'before';
       return [E.via === 'prompt' ? `I came back with a problem I had already brought up ${when}.` : E.via === 'error' ? `An error I had already hit ${when} showed up again.` : `A test I had already fought with ${when} failed again.`]; }
     case 'detour': return ['A failure sent me on a side quest: the fix was in a different part of the code from the one I set out to change.'];

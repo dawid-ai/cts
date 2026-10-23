@@ -268,14 +268,18 @@ export class Engine {
     const own = ownWords(text), mad = FRUSTRATION.test(own);
     // A correction right after a confident "done" weighs more: the answer sounded finished and was not what you asked.
     const prev = [...S.msgs].reverse().find((o) => o.actor === 'main'), sure = !!prev && prev.pos && !prev.neg && t - prev.t <= 30 * MIN;
+    // Asking for the same thing again after the agent had a turn at it: the first answer did not land.
+    const words = promptTopics(own), again = this.repeatOf(S, words, t);
+    (S.asks ||= []).push({ t, words, text }); if (S.asks.length > 20) S.asks.shift();
     if (MISREAD_LEAD.test(own)) {
       this.emit(S, 'misread', [ev], { base: BASE.misread + (sure ? 10 : 0) + (mad ? 5 : 0), actors: ['human'], headline: `You clarified what you meant: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure, frustrated: mad }, who: ev.d.who });
     } else if (REFUSAL_LEAD.test(text)) {
       this.emit(S, 'refusal', [ev], { actors: ['human'], headline: `You said no: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600) }, who: ev.d.who });
     } else if (REVERSAL_LEAD.test(text)) {
       this.emit(S, 'reversal', [ev], { actors: ['human'], headline: `You pulled back: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600) }, who: ev.d.who });
-    } else if (mad) {
-      this.emit(S, 'frustration', [ev], { base: BASE.frustration + (sure ? 10 : 0), actors: ['human'], headline: `You were losing patience: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure }, who: ev.d.who });
+    } else if (mad || again) {
+      const rep = again ? { repeat_of: trunc(again.text, 300), repeat_minutes: Math.round((t - again.t) / MIN) } : {};
+      this.emit(S, 'frustration', [ev], { base: BASE.frustration + (sure ? 10 : 0) + (mad && again ? 10 : 0), actors: ['human'], headline: mad ? `You were losing patience: “${trunc(text, 90)}”` : `You asked for the same thing again: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure, ...rep }, who: ev.d.who });
     }
     // The session's first request, or an error pasted into any prompt, seen in an earlier session.
     const ask = !S.asked && PROBLEM_RE.test(text) ? { text, topics: promptTopics(text) } : null;
@@ -285,6 +289,18 @@ export class Engine {
     this.recurCheck(S, ev, t, { errors: errorSigs(text), ask });
     this.hedgeFrom(S, ev, t, text);
     if (DECISIVE_RE.test(text)) this.closeByTopics(S, ev, t, topicsOf(text), 'decision');
+  }
+
+  /** An earlier request in this session (last hour, with an agent turn since) that this one repeats: 3+ shared topic words, Jaccard >= 0.6. */
+  repeatOf(S, words, t) {
+    if (words.length < 3 || !S.lastStop) return null;
+    for (const a of [...(S.asks || [])].reverse()) {
+      if (t - a.t > 60 * MIN) break;
+      if (S.lastStop.t < a.t) continue;
+      const shared = a.words.filter((w) => words.includes(w)).length;
+      if (shared >= 3 && shared / (a.words.length + words.length - shared) >= 0.6) return a;
+    }
+    return null;
   }
 
   onPre(S, ev, t) {

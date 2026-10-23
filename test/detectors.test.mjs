@@ -443,3 +443,17 @@ test('wholeSuite: the runner alone (or with flags) is the whole suite; files, pa
   for (const s of ['npm test', 'npm run test', 'pnpm -w x test', 'node --test', 'node --test-concurrency=1 --test', 'go test ./...', 'cargo test', 'pytest -x -q', 'npx vitest run', 'npm test -- --coverage']) assert.ok(w(s), s);
   for (const s of ['node --test test/a.test.mjs', 'node --test --test-name-pattern="x"', 'pytest tests/test_a.py', 'pytest -k refill', 'go test ./pkg/limiter', 'npx vitest run src/a.test.ts', 'jest -t refill', 'cargo test refill']) assert.ok(!w(s), s);
 });
+
+test('repeated request: the same ask after the agent had a turn is frustration; follow-ups, quick resends and old asks are not', () => {
+  const ask = (a, b, { stop = true, gap = 5 } = {}) => run((s) => { s.start(); s.prompt(a); s.adv(1); if (stop) s.stop('Added it.'); s.adv(gap); s.prompt(b); });
+  const r = ask('add a dark mode toggle to the settings page', 'can you add the dark mode toggle to the settings page please');
+  const f = r.moments.find((m) => m.kind === 'frustration');
+  assert.match(f.headline, /^You asked for the same thing again/);
+  assert.equal(f.evidence.repeat_of, 'add a dark mode toggle to the settings page');
+  assert.ok(!has(ask('add a dark mode toggle', 'make the dark mode toggle remember the choice across reloads'), 'frustration'), 'a follow-up');
+  assert.ok(!has(ask('add a dark mode toggle to the settings page', 'add a dark mode toggle to the settings page', { stop: false }), 'frustration'), 'no turn in between');
+  assert.ok(!has(ask('add a dark mode toggle to the settings page', 'add a dark mode toggle to the settings page', { gap: 90 }), 'frustration'), 'over an hour later');
+  assert.ok(!has(ask('continue', 'continue'), 'frustration'), 'too short to say');
+  const both = ask('add a dark mode toggle to the settings page', 'ugh, add the dark mode toggle to the settings page');
+  assert.equal(both.moments.find((m) => m.kind === 'frustration').score, 55, 'impatient and repeated');
+});
