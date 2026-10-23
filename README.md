@@ -152,10 +152,13 @@ it from your latest session. The storyteller is told to leave room for both, and
 **Vista Social.** Settings, Vista Social: **Connect Vista Social** signs in with OAuth (the callback is the local dashboard), or save a key
 link (https, vistasocial.com). The credentials stay in `~/.cts/vista.json` (mode 600), never in the log; `cts vista status|tools|link|disconnect`
 does the same from a terminal. `src/lib/vista.mjs` is CTS's only network code, and it runs only when you connect, list tools or profiles,
-or post. Choose which X profile to post as (Settings, Vista Social, Choose X profile; kept in the project's `cts.json` as
-`publishing.channels.x.vista`). Then every X post or thread in the queue has **Post It!**: after a confirm showing the exact text, it records
-your approval of that text for Vista Social (`draft.approve` with `to: "vista"`), and posts it now with `createOrUpdatePost` (a thread's
-first post, the rest as reply comments). The receipt keeps the Vista post id. The same gates apply as for files (kill switch, daily cap,
+or post. Choose which profile each of X, LinkedIn, Bluesky and Threads posts as (Settings, Vista Social; kept in the project's `cts.json` as
+`publishing.channels.<channel>.vista`). Then every post, thread or long post for those channels has two buttons. **Post It!** posts now.
+**Approve → queue** adds it to that profile's posting queue in Vista Social, at its next free slot (`publish_at: "queue_available"`; a profile
+with no queue slots is refused with a note, and nothing is sent). Both first show the exact text, then record your approval of that text for
+Vista Social (`draft.approve` with `to: "vista"`) and call `createOrUpdatePost` (a thread's first post, the rest as reply comments; LinkedIn
+as a text post). The receipt keeps the Vista post id. Channels without a Vista profile keep the old Approve, which writes to the outbox.
+**X Premium** (Settings, Posting) raises the X limit to 25,000 characters; pick the Long post format for X in Write a post. The same gates apply as for files (kill switch, daily cap,
 exact-text approval, no double post), only your own approval counts (never autopilot or an auto rule), the file queue leaves Vista approvals
 alone, and a failed post keeps the approval so Post It can retry.
 

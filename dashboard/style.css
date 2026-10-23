@@ -207,3 +207,4 @@ mark{background:color-mix(in srgb,var(--human) 28%,transparent);color:inherit;bo
 .vista .acts input{flex:1;min-width:200px;font:inherit;font-size:.85rem;background:var(--surface);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:4px 8px}
 .vtools ul{margin:6px 0;padding-left:18px;font-size:.85rem}.vtools summary{cursor:pointer;font-size:.85rem}
 .btn.postit{background:var(--k-shipped,#2f8f5b);color:#fff;border-color:transparent;font-weight:700}.btn.postit:hover{opacity:.9}.btn.postit:disabled{opacity:.5}
+.vas{display:flex;flex-direction:column;gap:2px;margin-top:6px}.vrow{margin-top:4px}.vrow .vch{min-width:78px;color:var(--mut);font-size:.85rem}.vrow select{max-width:340px}

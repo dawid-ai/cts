@@ -184,7 +184,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
             if (!x) { r = { error: 'no such draft' }; break; }
             if (!(x.status === 'approved' && x.approval && x.approval.to === 'vista' && x.approval.text_hash === textHash(x.text))) { const a = N.approve(pr, x.id, { to: 'vista' }); if (a.error) { r = a; break; } }
             posting.add(x.id);
-            try { const p = await PB.postToVista(pr, x.id); r = p.ok ? p : { error: p.reason }; } finally { posting.delete(x.id); }
+            try { const p = await PB.postToVista(pr, x.id, { when: b.when === 'queue' ? 'queue' : 'now' }); r = p.ok ? p : { error: p.reason }; } finally { posting.delete(x.id); }
             break;
           }
           case 'kill': PB.setKillSwitch(pr, !!b.on); r = { ok: true }; break;

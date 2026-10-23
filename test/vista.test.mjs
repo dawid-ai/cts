@@ -99,3 +99,35 @@ test('Post It: only your approval made for Vista posts; the file queue leaves it
   assert.match((await PB.postToVista(pr, auto, { session })).reason, /autopilot|own approval|wrong actor|auto-publish/, 'autopilot never posts through Vista');
   pr.close();
 });
+
+test('Approve to the Vista queue: asks for the next free slot, refuses a profile with no queue; LinkedIn goes as a text post; X Premium lifts the limit', async () => {
+  const { Project } = await import('../src/lib/project.mjs');
+  const { paths, serialize, loadConfig } = await import('../src/lib/util.mjs');
+  const N = await import('../src/lib/narrative.mjs');
+  const PB = await import('../src/lib/publish.mjs');
+  const { setVistaProfile } = await import('../src/lib/settings.mjs');
+  const { Sim } = await import('./helpers.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-vq-')); fs.mkdirSync(path.join(root, '.git')); fs.mkdirSync(paths(root).sessions, { recursive: true });
+  fs.writeFileSync(paths(root).config, JSON.stringify({ publishing: { channels: { x: { premium: true } } } }));
+  assert.equal(loadConfig(root).publishing.channels.x.limit, 25000);
+  const s = new Sim({ start: Date.now() - 3600e3 }); s.start(); s.prompt('add a limiter'); s.adv(1); s.prompt('wait, go back to the old refill logic'); s.stop('ok');
+  fs.writeFileSync(path.join(paths(root).sessions, 's.jsonl'), s.events.map(serialize).join(''));
+  setVistaProfile(root, 'linkedin', { profile_id: 470558, name: 'Dawid' }); setVistaProfile(root, 'bluesky', { profile_id: 751366, name: '@bsky' });
+  const pr = Project.open(root);
+  const m = pr.engine.listMoments().find((x) => x.kind === 'reversal');
+  const calls = [];
+  const queues = { 470558: [{ schedule: [{ day: 1, slots: [{ hour: 9 }] }] }], 751366: [] };
+  const session = { call: async (name, args) => { calls.push({ name, args }); return { content: [{ type: 'text', text: JSON.stringify(name === 'getProfileQueues' ? { queues: queues[args.profile_id] } : { id: 'p1' }) }] }; } };
+  const li = N.createDraft(pr, m.id, { channel: 'linkedin' }).id;
+  N.approve(pr, li, { to: 'vista' });
+  const r = await PB.postToVista(pr, li, { session, when: 'queue' });
+  assert.ok(r.ok, JSON.stringify(r)); assert.equal(r.receipt.when, 'queue');
+  const post = calls.find((c) => c.name === 'createOrUpdatePost').args;
+  assert.equal(post.publish_at, 'queue_available'); assert.deepEqual(post.customization, { publish_as: 'ARTICLE' });
+  const bs = N.createDraft(pr, m.id, { channel: 'bluesky' }).id;
+  N.approve(pr, bs, { to: 'vista' });
+  assert.match((await PB.postToVista(pr, bs, { session, when: 'queue' })).reason, /no posting queue/);
+  assert.equal(calls.filter((c) => c.name === 'createOrUpdatePost').length, 1, 'nothing sent for a profile without a queue');
+  assert.ok((await PB.postToVista(pr, bs, { session })).ok, 'Post It still works there');
+  pr.close();
+});

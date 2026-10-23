@@ -132,11 +132,14 @@ export function publishDraft(pr, id, { now = Date.now() } = {}) {
 /** Vista Social profile networks per CTS channel. */
 export const VISTA_NETWORK = { x: 'twitter', bluesky: 'bluesky', threads: 'threads', linkedin: 'linkedin', mastodon: 'mastodon' };
 const postIdOf = (text) => { try { const j = JSON.parse(text); const o = Array.isArray(j) ? j[0] : j; return String((o && (o.id || o.publication_id || o.post_id || (o.publication && o.publication.id))) || '') || null; } catch { const m = /"?(?:publication_id|post_id|id)"?\s*[:=]\s*"?([\w-]{6,})/.exec(text); return m ? m[1] : null; } };
+const COMMENTS = new Set(['twitter', 'bluesky', 'threads', 'linkedin']);
+export const VISTA_FORMATS = ['short', 'thread', 'linkedin'];
 /**
- * Post It: publish an approved draft now through Vista Social. Only a human approval made for Vista ({to:'vista'}) counts,
- * never autopilot. A thread goes out as one post with the rest as reply comments. `session` is for tests.
+ * Post It (when 'now') or Approve (when 'queue': the profile's next free slot in its Vista Social queue). Only a human approval
+ * made for Vista ({to:'vista'}) counts, never autopilot. A thread goes out as one post with the rest as reply comments.
+ * `session` is for tests.
  */
-export async function postToVista(pr, id, { now = Date.now(), session } = {}) {
+export async function postToVista(pr, id, { now = Date.now(), session, when = 'now' } = {}) {
   const no = (reason) => ({ ok: false, reason });
   const g = gates(pr, id, now);
   if (g.reason) return no(g.reason);
@@ -144,22 +147,33 @@ export async function postToVista(pr, id, { now = Date.now(), session } = {}) {
   if (x.approval.via !== 'human' || x.approval.to !== 'vista') return no('Post It needs your own approval for Vista Social');
   const v = chcfg.vista;
   if (!v || !v.profile_id) return no(`choose which ${x.channel} profile to post as (Settings, Vista Social)`);
-  if (!['short', 'thread'].includes(x.format)) return no('Post It sends short posts and threads');
+  if (!VISTA_FORMATS.includes(x.format)) return no('Vista Social takes posts, threads and long posts, not articles or dev-log lines');
   const problems = ADAPTERS.outbox.validate(x, chcfg);
   if (problems.length) return no(problems[0]);
+  const net = VISTA_NETWORK[x.channel] || x.channel;
   const posts = postsOf(x.text); if (posts.length === 1) posts[0] = posts[0].replace(/^1\/1\s+/, '');
-  const args = { profile_id: v.profile_id, message: posts[0], publish_at: 'now', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
-  if (posts.length > 1) args.customization = { comments: posts.slice(1).map((message) => ({ message })) };
+  if (posts.length > 1 && !COMMENTS.has(net)) return no(`a thread cannot go to ${x.channel}`);
+  const args = { profile_id: v.profile_id, message: posts[0], publish_at: when === 'queue' ? 'queue_available' : 'now', timezone: Intl.DateTimeFormat().resolvedOptions().timeZone };
+  const cz = {};
+  if (posts.length > 1) cz.comments = posts.slice(1).map((message) => ({ message }));
+  if (net === 'linkedin') cz.publish_as = 'ARTICLE';      // a text-only LinkedIn post
+  if (Object.keys(cz).length) args.customization = cz;
   let text;
   try {
-    const r = await (session || await VS.session()).call('createOrUpdatePost', args);
+    const s = session || await VS.session();
+    if (when === 'queue') {
+      const q = await s.call('getProfileQueues', { profile_id: v.profile_id });
+      const qs = (() => { try { return JSON.parse((q.content || []).map((c) => c.text || '').join('')).queues || []; } catch { return []; } })();
+      if (!qs.some((x2) => (x2.schedule || []).some((d) => (d.slots || []).length))) return no(`${v.name || 'this profile'} has no posting queue in Vista Social: set its time slots there, or use Post It`);
+    }
+    const r = await s.call('createOrUpdatePost', args);
     text = (r.content || []).map((c) => c.text || '').join('\n');
     if (r.isError) throw new Error(text.slice(0, 300) || 'Vista Social refused the post');
   } catch (e) {
     writeHumanEvent(pr.root, 'draft.fail', { draft: x.id, error: String(e.message || e).slice(0, 300) }, { sid: x.sid, actor: 'cts' });
     pr.sync(); return no('Vista Social: ' + (e.message || e));
   }
-  const receipt = { kind: 'vista', network: VISTA_NETWORK[x.channel] || x.channel, profile: v.name || String(v.profile_id), post_id: postIdOf(text), answer: text.slice(0, 300) };
+  const receipt = { kind: 'vista', network: net, profile: v.name || String(v.profile_id), post_id: postIdOf(text), when, answer: text.slice(0, 300) };
   writeHumanEvent(pr.root, 'draft.publish', { draft: x.id, channel: x.channel, receipt, request_id }, { sid: x.sid, actor: 'cts' });
   pr.sync();
   return { ok: true, receipt, request_id };

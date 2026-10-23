@@ -143,6 +143,9 @@ export function loadConfig(root) {
   for (const f of [path.join(os.homedir(), '.cts', 'config.json'), p.config]) {
     try { cfg = deepMerge(cfg, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch { /* optional */ }
   }
+  // X Premium allows posts up to 25,000 characters.
+  const x = cfg.publishing.channels.x;
+  if (x && x.premium) x.limit = Math.max(x.limit || 0, 25000);
   return cfg;
 }
 function deepMerge(a, b) {

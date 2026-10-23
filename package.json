@@ -1,6 +1,6 @@
 {
   "name": "cts",
-  "version": "0.2.15",
+  "version": "0.2.16",
   "description": "Capture The Struggle - truthful, attributed, visual record of Claude Code sessions",
   "type": "module",
   "license": "MIT",

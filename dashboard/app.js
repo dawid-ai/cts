@@ -606,21 +606,32 @@ async function dpost(body) {
 }
 const postsOfText = (t) => String(t).split(/\n\s*---\s*\n/).map((x) => x.trim()).filter(Boolean);
 const maskedText = (t) => { const out = []; let last = 0; for (const m of t.matchAll(/\[(?:redacted|repo|masked|email|path|host|url|internal-url|ip)\]/g)) { out.push(t.slice(last, m.index), h('mark', { title: 'masked by the redactor' }, m[0])); last = m.index + m[0].length; } out.push(t.slice(last)); return out; };
-/** Post It: approve exactly this text for Vista Social and post it now. Shown on X posts and threads once a profile is chosen. */
+// Vista Social: Post It posts now; Approve puts it in the profile's Vista queue (next free slot). Without a Vista profile for
+// the channel, Approve writes the post to the local outbox as before.
+const VISTA_CHANNELS = [['x', 'X'], ['linkedin', 'LinkedIn'], ['bluesky', 'Bluesky'], ['threads', 'Threads']];
+const chName = (c) => (VISTA_CHANNELS.find((x) => x[0] === c) || [, c])[1];
+const vistaAsFor = (d) => { const V = S.drafts.vista || {}; return V.connected && ['short', 'thread', 'linkedin'].includes(d.format) ? (V.as || {})[d.channel] || null : null; };
+async function sendVista(d, bad, when) {
+  const as = vistaAsFor(d);
+  if (S.editing === d.id) { toast('Save your edit first'); return; }
+  const what = when === 'queue' ? `Add this to ${as}'s posting queue in Vista Social (next free slot)?` : `Post this to ${chName(d.channel)} as ${as} now?`;
+  if (!confirm(`${what}${bad ? '\n\nThe honesty guard has objections: ' + d.guard.problems.join('; ') : ''}\n\n${d.text}`)) return;
+  S.posting = d.id; schedule();
+  const r = await dpost({ op: 'post-it', id: d.id, when });
+  S.posting = null; schedule();
+  if (r && r.ok) toast(when === 'queue' ? `Queued for ${chName(d.channel)} as ${as}` : `Posted to ${chName(d.channel)} as ${as}`);
+}
+function approveBtn(d, bad) {
+  if (vistaAsFor(d)) return h('button', { class: 'btn prim', disabled: !!S.posting, title: `Approve and add to ${vistaAsFor(d)}'s Vista Social queue`, onclick: () => sendVista(d, bad, 'queue') }, S.posting === d.id ? 'Sending…' : bad ? 'Approve anyway → queue' : 'Approve → queue');
+  return h('button', { class: 'btn prim', title: 'Approve: writes the exact text to the outbox for this channel', onclick: async () => { const r = await dpost({ op: 'approve', id: d.id }); if (r && r.held) toast('Approved. Held: ' + r.held); else if (r && r.published) toast('Approved: written to the outbox'); } }, bad ? 'Approve anyway' : 'Approve');
+}
+/** Post It: approve exactly this text for Vista Social and post it now. */
 function postIt(d, bad) {
-  const V = S.drafts.vista || {}, as = V.as && V.as[d.channel];
-  if (!V.connected || !['short', 'thread'].includes(d.format) || d.channel !== 'x') return null;
-  if (!as) return h('a', { class: 'mut', href: '#/settings', style: 'font-size:.8rem' }, 'Post It: choose an X profile');
-  const busy = S.posting === d.id;
-  return h('button', { class: 'btn postit', disabled: !!S.posting, title: `Approve this exact text and post it to X as ${as} now, through Vista Social`, onclick: async () => {
-    const t = (S.editing === d.id && $('#ed-' + d.id)) ? null : d.text;
-    if (!t) { toast('Save your edit first'); return; }
-    if (!confirm(`Post this to X as ${as} now?${bad ? '\n\nThe honesty guard has objections: ' + d.guard.problems.join('; ') : ''}\n\n${t}`)) return;
-    S.posting = d.id; schedule();
-    const r = await dpost({ op: 'post-it', id: d.id });
-    S.posting = null; schedule();
-    if (r && r.ok) toast(`Posted to X as ${as}`);
-  } }, busy ? 'Posting…' : 'Post It!');
+  const V = S.drafts.vista || {};
+  if (!V.connected || !VISTA_CHANNELS.some((c) => c[0] === d.channel) || !['short', 'thread', 'linkedin'].includes(d.format)) return null;
+  const as = vistaAsFor(d);
+  if (!as) return h('a', { class: 'mut', href: '#/settings', style: 'font-size:.8rem' }, `Post It: choose a ${chName(d.channel)} profile`);
+  return h('button', { class: 'btn postit', disabled: !!S.posting, title: `Approve this exact text and post it to ${chName(d.channel)} as ${as} now, through Vista Social`, onclick: () => sendVista(d, bad, 'now') }, S.posting === d.id ? 'Posting…' : 'Post It!');
 }
 function draftCard(d) {
   const m0 = d.source.moments && S.moments.get(d.source.moments[0]);
@@ -652,16 +663,15 @@ function draftCard(d) {
     h('div', { class: 'reports' },
       h('div', { class: rcount ? 'rep warn' : 'rep ok' }, rcount ? `Redaction masked ${rcount} item${rcount === 1 ? '' : 's'}: ${d.redaction.summary.map((x) => `${x.rule} ×${x.n}`).join(', ')}` : 'Redaction: nothing needed masking'),
       bad ? h('div', { class: 'rep warn' }, 'Honesty guard: ', d.guard.problems.join(' · ')) : h('div', { class: 'rep ok' }, 'Honesty guard: every number and quote traces to the log')),
-    d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => (r.receipt.kind === 'vista' ? `Posted to ${r.receipt.network === 'twitter' ? 'X' : r.receipt.network} as ${r.receipt.profile} through Vista Social${r.receipt.post_id ? ` (post ${r.receipt.post_id})` : ''}` : `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`)).join(' · ')) : null,
+    d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => (r.receipt.kind === 'vista' ? `${r.receipt.when === 'queue' ? 'Queued in Vista Social (next free slot)' : 'Posted through Vista Social'} for ${chName(d.channel)} as ${r.receipt.profile}${r.receipt.post_id ? ` · post ${r.receipt.post_id}` : ''}` : `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`)).join(' · ')) : null,
     d.fails && d.fails.length && open ? h('div', { class: 'rep warn' }, 'Last attempt failed: ', d.fails[d.fails.length - 1].error) : null,
     d.status === 'declined' && d.declined.reason ? h('div', { class: 'mut' }, `Declined: ${d.declined.reason}`) : null,
     d.status === 'replaced' ? h('div', { class: 'mut' }, 'Replaced by a rewrite') : null,
     d.status === 'discarded' ? h('div', { class: 'acts' }, h('span', { class: 'mut' }, 'Removed'), h('button', { class: 'btn', onclick: () => dpost({ op: 'restore', id: d.id }) }, 'Restore')) : null,
-    d.status === 'approved' && d.approval ? h('div', { class: 'mut' }, d.approval.at ? `Approved, goes out at ${fmtDT(Date.parse(d.approval.at))}` : 'Approved, waiting for the publish queue') : null,
+    d.status === 'approved' && d.approval ? h('div', { class: 'mut' }, d.approval.to === 'vista' ? 'Approved for Vista Social but not sent yet: press Post It! or Approve again' : d.approval.at ? `Approved, goes out at ${fmtDT(Date.parse(d.approval.at))}` : 'Approved, waiting for the publish queue') : null,
     open && !S.drafts.private ? h('footer', { class: 'acts' },
       editing ? [h('button', { class: 'btn prim', onmousedown: (e) => e.preventDefault(), onclick: saveEdit }, 'Save', h('kbd', {}, 'Ctrl+Enter')), h('button', { class: 'btn', onmousedown: (e) => e.preventDefault(), onclick: () => { S.editing = null; schedule(); } }, 'Cancel', h('kbd', {}, 'Esc'))]
-        : [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'approve', id: d.id }); if (r && r.held) toast('Approved. Held: ' + r.held); else if (r && r.published) toast('Published'); } }, bad ? 'Approve anyway' : 'Approve'),
-          h('label', { class: 'sched' }, 'or at ', h('input', { type: 'datetime-local', 'aria-label': 'Publish at', onchange: (e) => { if (e.target.value) dpost({ op: 'approve', id: d.id, at: new Date(e.target.value).toISOString() }); } })),
+        : [approveBtn(d, bad),
           postIt(d, bad),
           h('button', { class: 'btn', onclick: startEdit }, 'Edit'),
           h('button', { class: 'btn', title: 'Remove this draft. Unlike Decline, it teaches autopilot nothing; you can restore it from the closed list.', onclick: async () => { const r = await dpost({ op: 'discard', id: d.id, reason: 'removed' }); if (r) toast('Removed. Restore it from the closed list below.'); } }, 'Remove'),
@@ -670,7 +680,7 @@ function draftCard(d) {
 }
 // ---------- Writing posts ----------
 const TONES = [['wry', 'Dry, slightly sarcastic, worth a smirk'], ['dramatic', 'A hook, tension and a turn'], ['straight', 'Sincere and direct, no jokes']];
-const FORMATS = [['', 'Fits the channel'], ['short', 'Short post'], ['thread', 'Thread'], ['linkedin', 'LinkedIn post'], ['long', 'Article'], ['devlog', 'Dev-log lines']];
+const FORMATS = [['', 'Fits the channel'], ['short', 'Short post'], ['thread', 'Thread'], ['linkedin', 'Long post (LinkedIn, X Premium)'], ['long', 'Article (blog)'], ['devlog', 'Dev-log lines']];
 const WRITERS = [['claude', 'Claude (your login)'], ['api', 'Claude API key'], ['template', 'Template (dev-log lines only)']];
 const writerName = (v) => (WRITERS.find((w) => w[0] === v) || [, v])[1];
 const compVia = () => S.comp.via || (S.drafts && S.drafts.writer.via && S.drafts.writer.via !== 'template' ? S.drafts.writer.via : 'claude');
@@ -819,15 +829,20 @@ async function vpost(body) {
   try { return await api('/api/vista', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify(body) }); } catch (e) { toast((e.body && e.body.error) || e.message); return null; }
 }
 const loadVista = () => api('/api/vista').then((v) => { const was = S.vista && S.vista.connected; S.vista = v; if (v.connected && !was && S.vistaWait) { S.vistaWait = false; toast('Vista Social connected'); } schedule(); }).catch(() => {});
-/** Which X profile Post It posts as. The list is fetched only when you ask for it. */
+/** Which profile each channel posts as. The lists are fetched only when you ask for one. */
 function vistaAs() {
-  const cur = S.drafts && S.drafts.vista && S.drafts.vista.as.x;
-  const pick = async (p) => { const r = await vpost({ op: 'use', channel: 'x', profile_id: p ? p.id : null, name: p ? (p.username ? '@' + p.username : p.name) : null }); if (r) { S.vistaProfiles = null; S.drafts = await api('/api/drafts'); toast(p ? `X drafts post as ${p.username ? '@' + p.username : p.name}` : 'Post It turned off for X'); schedule(); } };
-  return h('div', { class: 'acts' }, h('span', {}, 'X drafts post as: ', h('b', {}, cur || 'nobody yet')),
-    S.vistaProfiles ? h('select', { 'aria-label': 'X profile for Post It', onchange: (e) => { const p = S.vistaProfiles.find((x) => String(x.id) === e.target.value); e.target.blur(); pick(p || null); } },
-      h('option', { value: '' }, 'Choose…'), S.vistaProfiles.map((p) => h('option', { value: p.id, disabled: p.status !== 'ok' }, `${p.username ? '@' + p.username : p.name}${p.status !== 'ok' ? ` (${p.status})` : ''}`)))
-      : h('button', { class: 'btn', onclick: async () => { const r = await vpost({ op: 'profiles', channel: 'x' }); if (r) { S.vistaProfiles = r.profiles; if (!r.profiles.length) toast('No X profiles on this Vista Social account'); schedule(); } } }, cur ? 'Change' : 'Choose X profile'),
-    cur ? h('button', { class: 'btn', onclick: () => pick(null) }, 'Turn off') : null);
+  S.vistaProfiles = S.vistaProfiles || {};
+  const row = ([ch, name]) => {
+    const cur = S.drafts && S.drafts.vista && S.drafts.vista.as[ch], list = S.vistaProfiles[ch];
+    const label = (p) => (p.username && ch !== 'linkedin' ? '@' + p.username : p.name.replace(/\s*\([^)]*\)\s*$/, ''));
+    const pick = async (p) => { const r = await vpost({ op: 'use', channel: ch, profile_id: p ? p.id : null, name: p ? label(p) : null }); if (r) { delete S.vistaProfiles[ch]; S.drafts = await api('/api/drafts'); toast(p ? `${name} drafts post as ${label(p)}` : `Posting turned off for ${name}`); schedule(); } };
+    return h('div', { class: 'acts vrow' }, h('span', { class: 'vch' }, name), h('b', {}, cur || 'off'),
+      list ? h('select', { 'aria-label': `${name} profile`, onchange: (e) => { const p = list.find((x) => String(x.id) === e.target.value); e.target.blur(); pick(p || null); } },
+        h('option', { value: '' }, 'Choose…'), list.map((p) => h('option', { value: p.id, disabled: p.status !== 'ok' }, `${p.name}${p.status !== 'ok' ? ` (${p.status})` : ''}`)))
+        : h('button', { class: 'btn', onclick: async () => { const r = await vpost({ op: 'profiles', channel: ch }); if (r) { S.vistaProfiles[ch] = r.profiles; if (!r.profiles.length) toast(`No ${name} profiles on this Vista Social account`); schedule(); } } }, cur ? 'Change' : 'Choose'),
+      cur ? h('button', { class: 'btn', onclick: () => pick(null) }, 'Turn off') : null);
+  };
+  return h('div', { class: 'vas' }, h('div', { class: 'mut' }, 'Post as. On a draft for one of these, Post It! posts now and Approve adds it to that profile\u2019s Vista queue (its next free slot).'), VISTA_CHANNELS.map(row));
 }
 function vistaBox() {
   const V = S.vista;
@@ -835,7 +850,7 @@ function vistaBox() {
   if (S.vistaWait && !V.connected && !S.vistaPoll) S.vistaPoll = setTimeout(() => { S.vistaPoll = null; loadVista(); }, 2500);
   const connect = async () => { const r = await vpost({ op: 'connect' }); if (r && r.url) { S.vistaWait = true; window.open(r.url, '_blank', 'noopener'); schedule(); } };
   return h('section', { class: 'sbox vista' }, h('h3', {}, 'Vista Social'),
-    h('div', { class: 'mut' }, 'Connect your Vista Social account for posting drafts to X. Posting happens only when you press a button on a draft, never on its own. Credentials stay in ~/.cts/vista.json on this machine, never in the log.'),
+    h('div', { class: 'mut' }, 'Connect your Vista Social account to post drafts to X, LinkedIn, Bluesky and Threads. Posting happens only when you press a button on a draft, never on its own. Credentials stay in ~/.cts/vista.json on this machine, never in the log.'),
     V.connected ? h('div', { class: 'acts' }, h('span', { class: 'rep ok' }, `Connected (${V.method === 'link' ? 'key link' : 'OAuth'})${V.since ? ' since ' + fmtD(Date.parse(V.since)) : ''}`),
       h('button', { class: 'btn', onclick: async () => { const r = await vpost({ op: 'tools' }); if (r) { S.vistaTools = r.tools; schedule(); } } }, 'Show what it can do'),
       h('button', { class: 'btn', onclick: async () => { if (confirm('Disconnect Vista Social? The stored credentials are deleted.')) { S.vista = await vpost({ op: 'disconnect' }); S.vistaTools = null; schedule(); } } }, 'Disconnect'))

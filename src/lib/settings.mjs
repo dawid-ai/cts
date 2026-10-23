@@ -33,6 +33,7 @@ export const FIELDS = [
     ...(DEFAULT_CONFIG.publishing.channels[c].limit ? [{ path: `publishing.channels.${c}.limit`, section: 'Channels', label: `${c}: character limit`, type: 'int', min: 1, max: 100000 }] : []),
     { path: `publishing.channels.${c}.cadence.time`, section: 'Channels', label: `${c}: next-slot time (HH:MM)`, type: 'time', dflt: '09:00' },
   ]),
+  { path: 'publishing.channels.x.premium', section: 'Posting', label: 'X Premium', type: 'bool', help: 'Posts on X can be up to 25,000 characters: pick the Long post format for X in Write a post.' },
   { path: 'notify.desktop', section: 'Notifications', label: 'Desktop notification for notify-mode drafts', type: 'bool' },
   { path: 'notify.terminal', section: 'Notifications', label: 'Line at session start when drafts wait', type: 'bool' },
   { path: 'redact.deny', section: 'Privacy', label: 'Always mask these terms', type: 'list' },
