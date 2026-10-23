@@ -148,6 +148,11 @@ export const RM_RE = /\b(?:git\s+rm|rm)\s+(?:-[a-zA-Z]+\s+)*([^;&|\n]+)/;
 export const HEDGE_RE = /\b(for now|temporar(?:y|ily)|TODO|revisit|(?<!\b(?:be|not|n't) )good enough(?!\s+to\b)|quick hack|placeholder|come back to|not sure yet|punt(?:ing)?|for the time being)\b/i;
 export const DECISIVE_RE = /\b(decid(?:ed|e)|let'?s (?:go|use|keep|do)|go(?:ing)? with|final(?:ly)?|settled|resolved|permanent(?:ly)?|make it (?:real|permanent|proper)|not temporary|keep it)\b/i;
 
+/** Inside a "…", “…” or `…` span on its own line (apostrophes are not quotes). */
+const quoted = (t, i) => {
+  const ln = t.slice(t.lastIndexOf('\n', i - 1) + 1, i);
+  return (ln.split('"').length - 1) % 2 === 1 || (ln.split('`').length - 1) % 2 === 1 || ln.lastIndexOf('“') > ln.lastIndexOf('”');
+};
 /** Sentence containing the hedge (<=200 chars), or null. Hedge words that are quoted or in code spans are discussion, not decisions. */
 export function hedgeSentence(text) {
   const t = String(text || '');
@@ -156,6 +161,7 @@ export function hedgeSentence(text) {
   while ((m = re.exec(t))) {
     const before = t[m.index - 1], after = t[m.index + m[0].length];
     if (/["'`“‘]/.test(before || '') && /["'`”’]/.test(after || '')) continue;
+    if (quoted(t, m.index)) continue;
     const sents = [];
     let pos = 0;
     for (const part of t.split(/(?<=[.!?])\s+|\n+/)) { const i = t.indexOf(part, pos); sents.push({ i, part }); pos = i + part.length; }

@@ -189,6 +189,9 @@ test('quoted hedge words and abbreviations do not open threads', async () => {
   assert.equal(hedgeSentence('The first draft is not good enough for anyone to read.'), null);
   assert.match(hedgeSentence('Leave the parser as it is, it is good enough for now.'), /good enough for now/);
   assert.match(hedgeSentence("Skip the cache, that's good enough."), /good enough/);
+  assert.equal(hedgeSentence('Now `"it\'s good enough"` and "good enough for now" still count as hedges.'), null);
+  assert.equal(hedgeSentence('The rule: “keep it for now unless asked” applies to drafts.'), null);
+  assert.match(hedgeSentence('I wrote "the parser" and it is fine for now, we can revisit.'), /for now/);
 });
 
 test('real-project regressions: a command that only mentions deploy is not a ship; a deploy segment is', () => {
