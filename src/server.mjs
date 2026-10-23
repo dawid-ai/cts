@@ -141,6 +141,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         const f = path.join(p.evidence, path.basename(url.searchParams.get('moment') || '') + '.json');
         return fs.existsSync(f) ? json(res, 200, readJson(f)) : json(res, 404, { error: 'no evidence snapshot' });
       }
+      if (url.pathname === '/api/hotspots') { pr.sync(); return json(res, 200, pr.engine.hotspots(root)); }
       if (url.pathname === '/api/drafts') { pr.sync(); return json(res, 200, draftsPayload()); }
       if (url.pathname === '/api/draft/card') {
         const d = pr.engine.drafts.get(url.searchParams.get('id') || '');

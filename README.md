@@ -160,7 +160,9 @@ and what each actor is doing, redrawn on every event. `cts watch --once` prints 
 
 `http://localhost:4848` (4849, 4850... if taken), static files served by the same process, live over Server-Sent Events.
 Views: **Live** (lanes per actor, human leftmost, moments as cards spanning the lanes they involve), **Story** (arcs as
-chapters, plus a redacted shareable page), **Threads**, **Sessions** (heat map, resume/fork links, per-session stats), **Drafts** (the review queue),
+chapters, plus a redacted shareable page), **Threads**, **Sessions** (heat map, resume/fork links, per-session stats), **Hotspots** (files and
+areas ranked across all sessions by struggle and correction moments near them, red test runs after editing them, and edits
+and commits; edits made through the shell, such as `sed -i`, redirects or a script's `open(p, 'w')`, count too), **Drafts** (the review queue),
 **Settings** (edits the common `cts.json` fields, keeps every other key, and rescores the project on save), and a
 **Transcript** drawer that opens the raw lines behind any event. Filters compose and live in the URL hash. Keyboard: `?`.
 It binds to 127.0.0.1 only, checks the Host header, and requires a custom header on every write.

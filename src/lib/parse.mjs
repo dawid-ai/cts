@@ -209,3 +209,24 @@ export function sameAsk(a, b) {
   const B = new Set(b), shared = a.filter((x) => B.has(x)).length;
   return shared >= 5 && shared / (a.length + b.length - shared) >= 0.8 && (shared === a.length || shared === b.length);
 }
+/** Files a shell command plainly writes (`> f`, `>> f`, `tee`, `sed -i`, `perl -pi`, `open('f', 'w')`, `writeFileSync('f'`), joined to its `cd`. Temp and device paths are left out. */
+export function writtenFiles(cmd) {
+  const out = new Set(), raw = String(cmd || '');
+  let dir = '';
+  const add = (f) => { f = f && dir && !/^(?:\/|~|[A-Za-z]:)/.test(f) ? `${dir}/${f.replace(/^\.\//, '')}` : f; if (f && !/^(?:&|-|''|""|\/dev\/|\/tmp\/|\/var\/(?:tmp|folders)\/)|\$/.test(f)) out.add(f); };
+  for (const part of skeleton(raw).split(/\s*(?:&&|\|\||;|\n|\|)\s*/)) {
+    const seg = part.trim().replace(SEG_PREFIX, ''), cd = /^cd\s+(\S+)$/.exec(seg);
+    if (cd) { dir = /^(?:\/|~|[A-Za-z]:)/.test(cd[1]) || !dir ? cd[1] : `${dir}/${cd[1]}`; continue; }
+    for (const r of seg.matchAll(/(?:^|[^\d&<>])>>?\s*([^\s<>&|;()]+)/g)) add(r[1]);
+    const args = seg.split(/\s+/).slice(1).filter((x) => !x.startsWith('-') && !/^(?:''|"")$/.test(x) && !/[<>]/.test(x));
+    if (/^tee\s/.test(seg)) args.forEach(add);
+    else if (/^(?:sed\s+(?:-\S+\s+)*-[a-zA-Z]*i|perl\s+(?:-\S+\s+)*-p?i)/.test(seg)) args.forEach(add);
+  }
+  for (const m of raw.matchAll(/\b(?:open\(\s*(['"])([^'"\n]+)\1\s*,\s*['"][wa]|writeFileSync\(\s*(['"])([^'"\n]+)\3)/g)) add(m[2] || m[4]);
+  // `p = 'src/x.mjs'` … `open(p, 'w')`: the variable's nearest quoted assignment before the write.
+  for (const m of raw.matchAll(/\b(?:open\(\s*([A-Za-z_]\w*)\s*,\s*['"][wa]|writeFileSync\(\s*([A-Za-z_]\w*)\s*,)/g)) {
+    const v = m[1] || m[2], set = [...raw.slice(0, m.index).matchAll(new RegExp(`(?:^|[\\s;(])(?:const\\s+|let\\s+)?${v}\\s*=\\s*(['"])([^'"\\n]+)\\1`, 'g'))].pop();
+    if (set) add(set[2]);
+  }
+  return [...out].slice(0, 20);
+}

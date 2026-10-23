@@ -17,7 +17,7 @@ const h = (tag, attrs = {}, ...kids) => {
 
 const KINDS = ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'pivot', 'memory-cut', 'refusal', 'wait', 'escalation', 'misread', 'frustration', 'recurring', 'mark', 'theory', 'workaround', 'learned'];
 const STRUGGLE_NOT = new Set(['shipped']);
-const VIEWS = [['live', 'Live'], ['story', 'Story'], ['threads', 'Threads'], ['sessions', 'Sessions'], ['drafts', 'Drafts'], ['settings', 'Settings']];
+const VIEWS = [['live', 'Live'], ['story', 'Story'], ['threads', 'Threads'], ['sessions', 'Sessions'], ['hotspots', 'Hotspots'], ['drafts', 'Drafts'], ['settings', 'Settings']];
 const GLYPH = { thinking: '◐', running: '▶', waiting: '⏸', done: '✓', failed: '✕' };
 
 const S = {
@@ -160,6 +160,7 @@ function connect() {
     for (const s of b.sessions) { const i = S.sessions.findIndex((x) => x.sid === s.sid); if (i >= 0) S.sessions[i] = s; else S.sessions.push(s); }
     S.sessions.sort((a, b) => a.start - b.start);
     if (b.arcs) S.arcs = b.arcs;
+    S.hotDirty = true;
     S.header = b.header; S.summary = b.summary;
     const follow = !F.sid && b.header && b.header.sid !== S.sid;
     if (follow) { loadSession(); return; }
@@ -208,7 +209,7 @@ function render() {
   const scroll = keep ? { top: keep.scrollTop, left: keep.scrollLeft } : null;
   main.replaceChildren();
   if (!S.loaded) { main.append(h('div', { class: 'empty' }, h('b', {}, 'Loading the project log…'))); return; }
-  ({ live: viewLive, story: viewStory, threads: viewThreads, sessions: viewSessions, drafts: viewDrafts, settings: viewSettings }[F.view])(main, scroll);
+  ({ live: viewLive, story: viewStory, threads: viewThreads, sessions: viewSessions, hotspots: viewHotspots, drafts: viewDrafts, settings: viewSettings }[F.view])(main, scroll);
 }
 
 function renderTabs() {
@@ -263,7 +264,7 @@ function chip(text, pressed, onclick, color, title) {
 const phone = window.matchMedia('(max-width:640px)');
 function renderFilters() {
   const f = $('#filters');
-  const off = F.view === 'drafts' || F.view === 'settings'; f.style.display = off ? 'none' : ''; $('#ftoggle').style.display = off ? 'none' : '';
+  const off = F.view === 'drafts' || F.view === 'settings' || F.view === 'hotspots'; f.style.display = off ? 'none' : ''; $('#ftoggle').style.display = off ? 'none' : '';
   if (off) return;
   if (S.filtersOpen === undefined) S.filtersOpen = !phone.matches;
   f.classList.toggle('collapsed', !S.filtersOpen);
@@ -556,6 +557,40 @@ function projectsTable(list) {
     p.current ? h('span', { class: 'tag' }, 'this project') : h('button', { class: 'btn', onclick: () => open(p) }, p.port ? 'Switch' : 'Open'))));
 }
 
+// ---------- Hotspots ----------
+// Files and areas ranked by trouble across every session. Heat: 3 per struggle or correction moment, 1 per red run, 1 per 5 edits or commits.
+function viewHotspots(main) {
+  const wrap = h('div', { class: 'hot' });
+  main.append(wrap);
+  // Refetched at most every 5 s while the log grows; the last answer stays on screen meanwhile.
+  if (!S.hotAt || (S.hotDirty && Date.now() - S.hotAt > 5000)) {
+    S.hotDirty = false; S.hotAt = Date.now();
+    api('/api/hotspots').catch(() => S.hot || { files: [], areas: [], total: 0 }).then((r) => { S.hot = r; if (F.view === 'hotspots') schedule(); });
+  }
+  if (!S.hot) { wrap.append(h('div', { class: 'empty' }, h('b', {}, 'Ranking files…'))); return; }
+  const { files, areas, total } = S.hot;
+  if (!files.length) { wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No hotspots yet'), 'Files show up here once sessions edit them. They rank higher when tests go red after an edit, or when a fight, a breakage or a correction happens near them.')); return; }
+  const mx = Math.max(1, ...files.map((r) => r.heat), ...areas.map((r) => r.heat));
+  const seg = (n, k, label) => n ? h('i', { style: `width:${(100 * n / mx).toFixed(1)}%;background:${k}`, title: label }) : null;
+  const bar = (r) => h('div', { class: 'hbar', role: 'img', 'aria-label': `heat ${r.heat}` },
+    seg(3 * r.struggles, 'var(--k-broke)', `${r.struggles} struggle moment(s)`), seg(3 * r.corrections, 'var(--k-reversal)', `${r.corrections} correction(s)`), seg(r.fails, 'var(--k-fight)', `${r.fails} red run(s)`), seg(Math.round((r.edits + r.commits) / 5), 'var(--churn)', `${r.edits} edit(s), ${r.commits} commit(s)`));
+  const stat = (n, one, many) => n ? h('span', {}, h('b', {}, n), ' ', n === 1 ? one : many) : null;
+  const goto = (id) => (e) => { e.preventDefault(); S.sel = id; setF({ view: 'story' }); };
+  const row = (r, name, sub) => {
+    const ms = r.moments.map((id) => S.moments.get(id)).filter(Boolean);
+    return h('div', { class: 'hrow' },
+      h('div', { class: 'hname' }, h('b', { class: 'mono', title: name }, name), sub ? h('span', { class: 'mut' }, sub) : null),
+      bar(r),
+      h('div', { class: 'stats' }, stat(r.struggles, 'struggle', 'struggles'), stat(r.corrections, 'correction', 'corrections'), stat(r.fails, 'red run', 'red runs'), stat(r.edits, 'edit', 'edits'), stat(r.commits, 'commit', 'commits'), stat(r.sessions, 'session', 'sessions'), r.last ? h('span', {}, 'last ', fmtDT(r.last)) : null),
+      ms.length ? h('details', {}, h('summary', {}, `${ms.length === 1 ? 'Moment' : `Latest ${ms.length} moments`}`), ...ms.map((m) => h('div', { class: 'hm' }, h('span', { class: 'tag', style: `color:var(--k-${m.kind})` }, m.kind), ' ', h('a', { href: '#/story', onclick: goto(m.id) }, trunc(m.headline, 110))))) : null);
+  };
+  wrap.append(
+    h('div', { class: 'mut hlegend' }, 'Ranked by heat:', ...[['--k-broke', 'struggles ×3'], ['--k-reversal', 'corrections ×3'], ['--k-fight', 'red runs after an edit'], ['--churn', 'edits and commits ÷5']].map(([k, t]) => h('span', {}, h('i', { style: `background:var(${k})` }), t))),
+    h('div', { class: 'mut hnote' }, 'A moment with no files of its own counts against the files written in the 30 minutes before it.'),
+    h('h2', { class: 'sec' }, `Areas (${areas.length})`), ...areas.map((a) => row(a, a.area, `${a.files} file${a.files === 1 ? '' : 's'}`)),
+    h('h2', { class: 'sec' }, `Files (${files.length}${total > files.length ? ` of ${total}` : ''})`), ...files.map((r) => row(r, r.file)));
+}
+
 // ---------- Drafts (the review queue) ----------
 async function dpost(body) {
   try {
@@ -704,7 +739,7 @@ async function showEvidence(mid) {
 function closeDrawer() { $('#drawer').hidden = true; }
 
 // ---------- keyboard ----------
-const HELP = [['1–6', 'Live, Story, Threads, Sessions, Drafts, Settings'], ['/', 'Focus search'], ['j / k', 'Next / previous item'], ['Enter', 'Expand card or open transcript'], ['m', 'Confirm selected moment'], ['x', 'Dismiss selected moment'], ['t', 'Open transcript for selection'], ['Shift+M', 'Mark the current moment'], ['g', 'Jump to now (Live)'], ['Esc', 'Close drawer / clear brush'], ['?', 'This map']];
+const HELP = [['1–7', 'Live, Story, Threads, Sessions, Hotspots, Drafts, Settings'], ['/', 'Focus search'], ['j / k', 'Next / previous item'], ['Enter', 'Expand card or open transcript'], ['m', 'Confirm selected moment'], ['x', 'Dismiss selected moment'], ['t', 'Open transcript for selection'], ['Shift+M', 'Mark the current moment'], ['g', 'Jump to now (Live)'], ['Esc', 'Close drawer / clear brush'], ['?', 'This map']];
 $('#help').append(h('h2', { style: 'margin-top:0' }, 'Keyboard map'), h('table', {}, ...HELP.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d)))), h('p', { class: 'mut' }, 'Drag a card onto another to merge. Right-click a lane header to hide it. Drag across the brush to select a time range.'), h('form', { method: 'dialog' }, h('button', { class: 'btn' }, 'Close')));
 $('#helpbtn').addEventListener('click', () => $('#help').showModal());
 $('#ftoggle').addEventListener('click', () => { S.filtersOpen = !S.filtersOpen; schedule(); });
@@ -719,7 +754,7 @@ document.addEventListener('keydown', (e) => {
   const k = e.key;
   if (k === '?') { $('#help').showModal(); }
   else if (k === 'Escape') { closeDrawer(); if (F.from || F.to) setF({ from: 0, to: 0 }); }
-  else if (['1', '2', '3', '4', '5', '6'].includes(k)) setF({ view: VIEWS[+k - 1][0] });
+  else if (k >= '1' && k <= String(VIEWS.length)) setF({ view: VIEWS[+k - 1][0] });
   else if (k === '/') { e.preventDefault(); $('#q').focus(); }
   else if (k === 'j') select(cur < 0 ? items.length - 1 : cur + 1);
   else if (k === 'k') select(cur < 0 ? items.length - 1 : cur - 1);

@@ -34,6 +34,7 @@ function seed() {
   fs.writeFileSync(paths(root).config, JSON.stringify({ port: 0, drafts: { channels: ['x', 'bluesky'], modes: { 'shipped:x': 'notify' } }, publishing: { channels: { blog: { adapter: 'blog', dir: 'content/posts', cap: 2 } } } }));
   const s = new Sim({ start: Date.now() - 3 * 3600e3, cwd: root }); s.start();
   s.prompt('make the limiter pass for Acme Corp, key sk-ant-api03-' + 'x'.repeat(40)); s.adv(1);
+  s.call('Edit', { file_path: path.join(root, 'src', 'limiter.js') }); s.adv(1);
   for (let i = 0; i < 4; i++) { s.bash('npm test', { ok: false, out: JEST_RED(2) }); s.adv(2); }
   s.bash('npm test', { out: JEST_GREEN }); s.adv(1);
   s.subStart('a1', 'planner', 'planner'); s.adv(2); s.subStop('a1', 'planner', 'The plan is complete and ready to implement.');
@@ -81,7 +82,8 @@ test('no surface opens a non-loopback connection, resolves a hostname, or runs a
     E.prepare(pr);
     pr.close();
     const s = await startServer({ root, port: 0, quiet: true, tickMs: 50, notifySend: () => {} }); stops.push(s.stop);
-    for (const p of ['/api/state', '/api/drafts', '/api/share/story.html', '/']) assert.equal((await fetch(`http://127.0.0.1:${s.port}${p}`)).status, 200, p);
+    for (const p of ['/api/state', '/api/drafts', '/api/hotspots', '/api/share/story.html', '/']) assert.equal((await fetch(`http://127.0.0.1:${s.port}${p}`)).status, 200, p);
+    assert.equal((await (await fetch(`http://127.0.0.1:${s.port}/api/hotspots`)).json()).files[0].file, 'src/limiter.js');
     await new Promise((r) => setTimeout(r, 200));
   } finally {
     for (const f of stops) f();

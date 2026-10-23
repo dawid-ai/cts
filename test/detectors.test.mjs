@@ -346,3 +346,43 @@ test('recurring survives a retention trim: the failure history is in the snapsho
   for (const e of sim.events.filter((x) => x.sid === 'c')) e2.push(structuredClone(e));
   assert.equal(e2.listMoments().find((m) => m.kind === 'recurring' && m.sid === 'c').evidence.sessions, 2);
 });
+
+test('hotspots: files ranked by struggles, corrections, red runs after an edit and edits; paths made relative; areas count a moment once', async () => {
+  const { Engine } = await import('../src/lib/engine.mjs');
+  const { sim, eng } = run((s) => {
+    s.sid = 'a'; s.start();
+    s.call('Edit', { file_path: '/work/app/src/lib/limiter.js' }); s.call('Edit', { file_path: '/work/app/src/lib/clock.js' }); s.adv(1);
+    for (let i = 0; i < 3; i++) { s.bash('npm test', { ok: false, out: JEST_RED(1) }); s.adv(2); }
+    s.bash('npm test', { out: JEST_GREEN }); s.adv(1);
+    s.call('Edit', { file_path: '/work/app/README.md' }); s.adv(60);
+    s.call('Edit', { file_path: '/work/app/README.md' }); s.adv(1);
+    s.prompt('no, don\'t touch the readme'); s.adv(60 * 24);
+    s.sid = 'b'; s.start(); s.call('Edit', { file_path: '/work/app/src/lib/limiter.js', old_string: 'x' }, { ok: false }); s.adv(60 * 24);
+    s.sid = 'c'; s.demo = true; s.start(); s.call('Edit', { file_path: '/work/app/demo.js' }); s.demo = false;
+    s.sid = 'd'; s.start(); s.bash('cd src && sed -i \'s/a/b/\' ../README.md lib/clock.js && npm test 2>&1 | tee /tmp/t.log');
+    for (const sid of ['d', 'e']) { s.sid = sid; s.bash('git commit -m "x"', { git: { branch: 'feat', sha: 'abc123', subject: 'x', files: ['README.md'] } }); }
+  });
+  const H = eng.hotspots('/work/app');
+  const row = (f) => H.files.find((r) => r.file === f);
+  assert.deepEqual(H.files.map((r) => r.file), ['src/lib/limiter.js', 'src/lib/clock.js', 'README.md']);
+  assert.deepEqual([row('src/lib/limiter.js').struggles, row('src/lib/limiter.js').fails, row('src/lib/limiter.js').edits, row('src/lib/limiter.js').sessions], [1, 4, 1, 2]);
+  // Shell writes count as edits (relative to their `cd`, temp files left out); one commit seen in two sessions counts once.
+  assert.deepEqual([row('README.md').corrections, row('README.md').struggles, row('README.md').edits, row('README.md').commits], [1, 0, 3, 1]);
+  assert.deepEqual([row('src/lib/clock.js').edits, H.total], [2, 3]);
+  const lib = H.areas.find((a) => a.area === 'src/lib');
+  assert.deepEqual([lib.files, lib.struggles, H.areas[H.areas.length - 1].area], [2, 1, '(top level)']);
+  // Trimmed sessions keep their counts through the snapshot, without double counting the sessions that replay.
+  const snap = eng.snapshot(['a'], Date.parse(sim.events.find((e) => e.sid === 'b').ts) - 1);
+  const e2 = new Engine(); e2.restore(snap);
+  for (const e of sim.events.filter((x) => x.sid !== 'a')) e2.push(structuredClone(e));
+  assert.deepEqual(e2.hotspots('/work/app'), H);
+});
+
+test('writtenFiles: redirects, tee, sed -i, perl -pi and script writes, joined to the cd; reads, temp and device paths are not writes', async () => {
+  const { writtenFiles: w } = await import('../src/lib/parse.mjs');
+  assert.deepEqual(w("cd /r && sed -i 's/x/y/' src/a.mjs lib/b.mjs"), ['/r/src/a.mjs', '/r/lib/b.mjs']);
+  assert.deepEqual(w("cat > notes.md <<'EOF'\nhello > not-a-file\nEOF"), ['notes.md']);
+  assert.deepEqual(w("python3 - <<'EOF'\np='src/a.mjs'; s=open(p).read()\nopen(p,'w').write(s)\nopen(\"b.txt\", 'a')\nEOF"), ['b.txt', 'src/a.mjs']);
+  assert.deepEqual(w("npm test 2>&1 | tee test.log; perl -pi -e 's/a/b/' x.pl"), ['test.log', 'x.pl']);
+  for (const c of ['sed -n 1,5p a.js', 'echo hi >> /tmp/x; ls > /dev/null 2>&1', 'echo $X > "$OUT"', "python3 -c \"p=open('a').read()\"", 'cmd >&2', 'cd $S && sed -i x h2']) assert.deepEqual(w(c), [], c);
+});

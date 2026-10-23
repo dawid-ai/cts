@@ -1,6 +1,6 @@
 // The signal layer, Tier 1: deterministic detectors, threads, sessions and arcs.
 // Pure and replayable: feed it the same ordered events and you get the same moments (that is what `cts reindex` relies on).
-import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk } from './parse.mjs';
+import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk, writtenFiles } from './parse.mjs';
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
@@ -10,6 +10,16 @@ export const KINDS = Object.keys(BASE);
 const MIN = 60000;
 const DAY = 86400000;
 const HUMAN = new Set(['mark', 'confirm', 'dismiss', 'rescore', 'merge', 'thread.close']);
+// A shell command's relative path joined to the event's cwd, with `.` and `..` resolved.
+const absPath = (cwd, f) => {
+  if (/^(?:\/|~|[A-Za-z]:)/.test(f) || !cwd) return f;
+  const out = [];
+  for (const p of `${cwd}/${f}`.replace(/\\/g, '/').split('/')) p === '..' ? out.length > 1 && out.pop() : p !== '.' && (p || !out.length) && out.push(p);
+  return out.join('/');
+};
+// Hotspots: moments that count against the files they touched (or the files written in the 30 minutes before them).
+const STRUGGLE = new Set(['fight', 'broke', 'recurring', 'escalation', 'memory-cut']);
+const CORRECTION = new Set(['reversal', 'refusal', 'misread', 'frustration', 'disagreement']);
 
 const REFUSAL_LEAD = /^\s*(?:no[,.!\s]+(?:don'?t|do not|stop|not)|don'?t|do not|stop\b|i don'?t want|not that|never mind)/i;
 const REVERSAL_LEAD = /^\s*(?:wait\b|no\b|nope\b|actually\b|go back|that'?s wrong|that is wrong|revert|undo|scratch that|hold on|hang on)/i;
@@ -109,7 +119,7 @@ export class Engine {
     if (!S) {
       S = {
         sid, start: null, end: null, source: null, parent: null, model: null, demo: false, events: 0,
-        branch: null, branchSince: null, fails: new Map(), lastGreen: new Map(), reads: new Set(), cut: null, writes: new Map(),
+        branch: null, branchSince: null, fails: new Map(), lastGreen: new Map(), reads: new Set(), cut: null, writes: new Map(), touched: new Map(),
         pendingRemove: null, ring: [], msgs: [], pre: new Map(), actors: new Map(), status: {}, waitMark: null,
         stats: { moments: 0, attempts: 0, redGreen: 0, tools: 0, fails: 0 }, lastMoment: null, ended: null,
       };
@@ -211,6 +221,7 @@ export class Engine {
       detector: kind, tier: 1, demo: S.demo,
     };
     if (o.who) m.who = o.who;
+    if (!m.files.length && (STRUGGLE.has(kind) || CORRECTION.has(kind))) { const near = this.nearFiles(S, last._t); if (near.length) m.near = near; }
     this.moments.set(id, m);
     S.lastMoment = m;
     this._ch.moments.add(id);
@@ -301,7 +312,7 @@ export class Engine {
       if (!fail) for (const th of this.threads.values()) if (!th.closed && th.key === d.tool_use_id) this.closeThread(th, ev, t, 'answered');
       S.waitMark = null;
     }
-    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(d.tool) && !fail) { const f = i.file_path || i.notebook_path; if (f) S.writes.set(f, t); }
+    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(d.tool) && !fail) { const f = i.file_path || i.notebook_path; if (f) { S.writes.set(f, t); this.touch(S, f, t); } }
     if (d.tool === 'Read' && !fail) this.onRead(S, ev, t, i.file_path);
     if (d.tool === 'EnterWorktree' && !fail) this.emit(S, 'pivot', [ev], { headline: 'Started a worktree to try another path', actors: [ev.actor] });
 
@@ -326,10 +337,62 @@ export class Engine {
         S.fails.delete(key);
       }
     }
+    // A failed call on a file counts against it; a red test run counts against the files written just before it.
+    if (red) for (const f of d.tool === 'Bash' ? (tst ? this.nearFiles(S, t) : []) : [i.file_path || i.notebook_path].filter(Boolean)) this.fileStat(S, f, 1, t);
     if (tst && tst.red != null) this.onTest(S, ev, tst, key, red, t);
     else if (red && d.tool === 'Bash') this.recurCheck(S, ev, t, { errors: errorSigs(d.out) });
     if (d.git && !fail) this.onGit(S, ev, t);
-    if (d.tool === 'Bash' && !fail) this.onBash(S, ev, t);
+    if (d.tool === 'Bash' && !fail) { this.onBash(S, ev, t); for (const f of writtenFiles(i.command)) this.touch(S, absPath(ev.cwd, f), t); }
+  }
+
+  /** A file this session wrote, by an edit tool or a shell command: counted for hotspots and remembered for `nearFiles`. */
+  touch(S, f, t) { S.touched.delete(f); S.touched.set(f, t); if (S.touched.size > 500) S.touched.delete(S.touched.keys().next().value); this.fileStat(S, f, 0, t); }
+  /** Files written in this session in the 30 minutes before `t`, newest first (at most 8). */
+  nearFiles(S, t) { return [...S.touched].filter(([, w]) => w <= t && t - w <= 30 * MIN).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f]) => f); }
+  /**
+   * Per file: `s` is {sid: [edits, failures, last time]}, kept per session so a retention snapshot carries trimmed sessions
+   * without double counting the ones that replay; `c` is {commit sha: time}, so a commit seen twice counts once.
+   */
+  fileStat(S, f, k, t, sha) {
+    if (S.demo) return;
+    const all = (this.files ||= new Map()), r = all.get(f) || { s: {}, c: {} };
+    if (sha) r.c[sha] = t;
+    else { const c = (r.s[S.sid] ||= [0, 0, 0]); c[k]++; c[2] = Math.max(c[2], t); }
+    all.delete(f); all.set(f, r);
+    if (all.size > 5000) all.delete(all.keys().next().value);
+  }
+  /** Files and areas ranked by trouble across all sessions: struggle and correction moments, red runs after editing, then edits. Paths under `root` are made relative. */
+  hotspots(root = '', { limit = 40 } = {}) {
+    const rel = (f) => { const x = String(f).replace(/\\/g, '/'), r = String(root).replace(/\\/g, '/').replace(/\/$/, ''); return r && x.startsWith(r + '/') ? x.slice(r.length + 1) : x; };
+    const rows = new Map(), row = (f) => { const k = rel(f); let r = rows.get(k); if (!r) rows.set(k, r = { file: k, edits: 0, commits: 0, fails: 0, struggles: 0, corrections: 0, sessions: new Set(), last: 0, moments: [], kinds: new Map() }); return r; };
+    for (const [f, { s, c }] of this.files || []) {
+      const r = row(f);
+      for (const [sid, [e, x, t]] of Object.entries(s)) { r.edits += e; r.fails += x; r.sessions.add(sid); r.last = Math.max(r.last, t); }
+      for (const t of Object.values(c)) { r.commits++; r.last = Math.max(r.last, t); }
+    }
+    for (const m of this.moments.values()) {
+      const k = m.demo || m.status === 'dismissed' ? null : STRUGGLE.has(m.kind) ? 'struggles' : CORRECTION.has(m.kind) ? 'corrections' : null;
+      if (k) for (const f of new Set((m.files.length ? m.files : m.near || []).map(rel))) { const r = row(f); r[k]++; r.sessions.add(m.sid); r.last = Math.max(r.last, m.t1); r.moments.push(m.id); r.kinds.set(m.id, k); }
+    }
+    const heat = (r) => 3 * (r.struggles + r.corrections) + r.fails + Math.round((r.edits + r.commits) / 5);
+    const out = ({ kinds, ...r }) => ({ ...r, sessions: r.sessions.size, heat: heat(r), moments: r.moments.slice(-5) });
+    const areas = new Map();
+    for (const r of rows.values()) {
+      const parts = r.file.split('/'), name = r.file.startsWith('/') || /^[A-Za-z]:/.test(r.file) || r.file.startsWith('~') ? '(outside the project)' : parts.length > 1 ? parts.slice(0, Math.min(2, parts.length - 1)).join('/') : '(top level)';
+      const a = areas.get(name) || { area: name, files: 0, edits: 0, commits: 0, fails: 0, sessions: new Set(), last: 0, kinds: new Map() };
+      a.files++; a.edits += r.edits; a.commits += r.commits; a.fails += r.fails;
+      for (const s of r.sessions) a.sessions.add(s);
+      for (const [id, k] of r.kinds) a.kinds.set(id, k);
+      a.last = Math.max(a.last, r.last); areas.set(name, a);
+    }
+    // A moment near two files of one area counts once for the area.
+    for (const a of areas.values()) { const ks = [...a.kinds.values()]; Object.assign(a, { struggles: ks.filter((k) => k === 'struggles').length, corrections: ks.filter((k) => k === 'corrections').length, moments: [...a.kinds.keys()] }); }
+    const rank = (a, b) => b.heat - a.heat || b.last - a.last;
+    return {
+      files: [...rows.values()].map(out).sort(rank).slice(0, limit),
+      areas: [...areas.values()].map(out).sort(rank).slice(0, 20),
+      total: rows.size,
+    };
   }
 
   label4(key) { return key.replace(/^(test|bash):/, '').replace(/^[^:]+:(?=[^ ])/, '') || key; }
@@ -418,6 +481,7 @@ export class Engine {
       if (!S.branch) { S.branch = g.branch; S.branchSince = t; }
     }
     const files = g.files || [];
+    if (g.op === 'commit') for (const f of files) this.fileStat(S, f, 0, t, g.sha || `${t}:${g.subject}`);
     if (g.op === 'commit' && this.isMain(g.branch)) {
       this.emit(S, 'shipped', [ev], { headline: `Shipped: ${trunc(g.subject || 'commit', 90)}`, files, branch: g.branch, body: [g.stat ? `${g.stat.files} files, +${g.stat.ins}/-${g.stat.del}` : ''], evidence: { sha: g.sha, subject: g.subject, stat: g.stat } });
     } else if (g.op === 'merge' && this.isMain(g.branch)) {
@@ -711,7 +775,7 @@ export class Engine {
     return JSON.parse(JSON.stringify({
       v: 1, at, sids: [...all], sessions: sess, moments: [...this.moments.values()], threads: [...this.threads.values()],
       dismissals: this.dismissals, tags: [...(this.tags || new Map())], receipts: this.receipts || [], lastExtract: this.lastExtract || null, lastAuto: this.lastAuto || null,
-      failHist: [...(this.failHist || new Map())], warm: [...this.warm.values()].filter((w) => all.has(w.sid)),
+      failHist: [...(this.failHist || new Map())], files: [...(this.files || new Map())].map(([f, r]) => [f, { s: Object.fromEntries(Object.entries(r.s).filter(([sid]) => all.has(sid))), c: r.c }]), warm: [...this.warm.values()].filter((w) => all.has(w.sid)),
     }));
   }
   /** Load a snapshot before replaying the log (Project.init does this). */
@@ -725,6 +789,7 @@ export class Engine {
     if (snap.lastExtract) this.lastExtract = snap.lastExtract;
     if (snap.lastAuto) this.lastAuto = snap.lastAuto;
     if (snap.failHist) this.failHist = new Map(snap.failHist);
+    if (snap.files) this.files = new Map(snap.files);
     for (const w of snap.warm || []) this.warm.set(w.id, w);
     for (const x of snap.sessions) {
       const S = this.S(x.sid);
