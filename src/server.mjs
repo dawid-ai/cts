@@ -11,7 +11,7 @@ import { slim } from './lib/summary.mjs';
 import { buildStoryHtml } from './lib/share.mjs';
 import * as N from './lib/narrative.mjs';
 import * as PB from './lib/publish.mjs';
-import { loadVoice, acceptSuggestion, undoSuggestion } from './lib/voice.mjs';
+import { loadVoice, acceptSuggestion, undoSuggestion, VOICE_TEMPLATE } from './lib/voice.mjs';
 import { postsOf } from './lib/drafts.mjs';
 import { notifyDrafts } from './lib/notify.mjs';
 import { companionData } from './lib/companion.mjs';
@@ -47,9 +47,10 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
     const list = store.list().map((d) => {
       const chk = N.checkDraft(pr, d);
       const ch = (pr.cfg.publishing.channels || {})[d.channel] || {};
-      return { ...d, posts: postsOf(d.text).map((t) => ({ text: t, chars: t.length })), limit: ch.limit || null, guard: chk, mode: N.modeFor(pr, d.kind, d.channel), cap: ch.cap ?? null, publishedToday: store.publishedToday(d.channel) };
+      return { ...d, posts: (d.format === 'thread' ? postsOf(d.text) : [d.text.trim()]).map((t) => ({ text: t, chars: t.length })), limit: ch.limit || null, guard: chk, mode: N.modeFor(pr, d.kind, d.channel), cap: ch.cap ?? null, publishedToday: store.publishedToday(d.channel) };
     });
-    return { drafts: list, suggestions: [...store.suggestions.values()], paused: PB.isPaused(pr), counts: N.counts(pr), channels: Object.keys(pr.cfg.publishing.channels || {}), private: !!pr.cfg.private, version: store.version };
+    return { drafts: list, suggestions: [...store.suggestions.values()], paused: PB.isPaused(pr), counts: N.counts(pr), channels: Object.keys(pr.cfg.publishing.channels || {}), private: !!pr.cfg.private, version: store.version,
+      writer: { via: pr.cfg.drafts.writer || 'template', tone: pr.cfg.drafts.tone || 'story', quotes: !!pr.cfg.drafts.quotes, model: pr.cfg.drafts.model } };
   };
   let sentVersion = -1, lastQueue = 0, actual = null, lastAutoCheck = 0;
   const auto = new AutoExtractor(pr, { ask: extractAsk });
@@ -149,14 +150,22 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
         if (!f || !f.startsWith(p.cts) || !fs.existsSync(f)) return json(res, 404, { error: 'no card' });
         res.writeHead(200, { 'content-type': MIME['.svg'], 'cache-control': 'no-store' }); return res.end(fs.readFileSync(f));
       }
-      if (url.pathname === '/api/voice') return json(res, 200, { text: loadVoice(root).text });
+      if (url.pathname === '/api/voice' && req.method === 'POST') {
+        const origin = req.headers.origin;
+        if (req.headers['x-cts'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) return json(res, 403, { error: 'forbidden' });
+        const b = await body(req);
+        if (typeof b.text !== 'string' || b.text.length > 20000) return json(res, 400, { error: 'the voice profile must be text under 20000 characters' });
+        fs.mkdirSync(p.cts, { recursive: true }); fs.writeFileSync(p.voice + '.tmp', b.text.replace(/\r\n/g, '\n')); fs.renameSync(p.voice + '.tmp', p.voice);
+        return json(res, 200, { ok: true, text: loadVoice(root).text });
+      }
+      if (url.pathname === '/api/voice') return json(res, 200, { text: loadVoice(root).text || VOICE_TEMPLATE, saved: !!loadVoice(root).text });
       if (url.pathname === '/api/draft' && req.method === 'POST') {
         const origin = req.headers.origin;
         if (req.headers['x-cts'] !== '1' || (origin && new URL(origin).host !== req.headers.host)) return json(res, 403, { error: 'forbidden' });
         const b = await body(req);
         let r;
         switch (b.op) {
-          case 'create': { const via = b.via || pr.cfg.drafts.writer; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { channel: b.channel, format: b.format, force: !!b.force, via, ask: storyAsk }) : N.createDraft(pr, b.source, { channel: b.channel, format: b.format, force: !!b.force }); break; }
+          case 'create': { const via = b.via || pr.cfg.drafts.writer, o = { channel: b.channel, format: b.format || undefined, force: !!b.force, replace: b.replace || undefined }; r = via === 'claude' || via === 'api' ? await N.writeStory(pr, b.source, { ...o, via, ask: storyAsk, tone: b.tone, quotes: b.quotes == null ? undefined : !!b.quotes }) : N.createDraft(pr, b.source, o); break; }
           case 'approve': r = N.approve(pr, b.id, { at: b.at || undefined }); if (!r.error) { const pub = PB.publishDraft(pr, b.id); r.published = pub.ok ? pub.receipt : null; r.held = pub.ok ? null : pub.reason; } break;
           case 'edit': r = N.edit(pr, b.id, b.text); break;
           case 'decline': r = N.decline(pr, b.id, b.reason || ''); break;

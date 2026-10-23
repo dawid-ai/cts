@@ -28,11 +28,15 @@ export class DraftStore {
           redaction: d.redaction || { summary: {}, count: 0 }, card: d.card || null, status: 'pending', created_ts: ev.ts, created_t: t, sid: ev.sid,
           edits: [], approval: null, declined: null, receipts: [], fails: [], origin: d.origin || 'manual', score: d.score || 0, kind: d.kind || null,
           voice_rev: d.voice_rev || null, title: d.title || null, mode: d.mode || 'draft', notify: d.mode === 'notify', notified: null, writer: d.writer || 'template',
+          tone: d.tone || null, quotes: !!d.quotes, replaces: d.replaces || null, replaced_by: null,
         });
+        // A rewrite takes the place of the draft it was asked for: that one is closed as replaced (not declined, so no penalty).
+        const old = d.replaces && this.drafts.get(d.replaces);
+        if (old && (old.status === 'pending' || old.status === 'approved')) { old.status = 'replaced'; old.replaced_by = d.draft; old.approval = null; }
         break;
       }
       case 'draft.edit': {
-        const x = this.drafts.get(d.draft); if (!x || x.status === 'published' || x.status === 'declined') break;
+        const x = this.drafts.get(d.draft); if (!x || ['published', 'declined', 'replaced'].includes(x.status)) break;
         x.edits.push({ event: ev.id, ts: ev.ts, from: x.text, removed: d.removed || [] });
         x.text = d.text; x.redaction = d.redaction || x.redaction;
         x.approval = null; x.status = 'pending';       // an edit always voids a previous approval
@@ -40,7 +44,7 @@ export class DraftStore {
         break;
       }
       case 'draft.approve': {
-        const x = this.drafts.get(d.draft); if (!x || x.status === 'published' || x.status === 'declined') break;
+        const x = this.drafts.get(d.draft); if (!x || ['published', 'declined', 'replaced'].includes(x.status)) break;
         if (d.text_hash !== textHash(x.text)) break;   // approval of text that is no longer the draft: void
         x.status = 'approved'; x.approval = { event: ev.id, ts: ev.ts, t, actor: ev.actor, via: d.via || 'human', rule: d.rule || null, at: d.at || null, text_hash: d.text_hash };
         break;
@@ -80,7 +84,7 @@ export class DraftStore {
     const hit = [...this.drafts.values()].filter((x) => x.id.startsWith(idOrPrefix) || x.id.endsWith(idOrPrefix));
     return hit.length === 1 ? hit[0] : null;
   }
-  existsFor(sourceId, channel, format) { return [...this.drafts.values()].some((x) => x.source.id === sourceId && x.channel === channel && x.format === format && x.status !== 'declined'); }
+  existsFor(sourceId, channel, format, except) { return [...this.drafts.values()].some((x) => x.source.id === sourceId && x.channel === channel && x.format === format && x.status !== 'declined' && x.status !== 'replaced' && x.id !== except); }
   publishedToday(channel, now = Date.now()) {
     const d0 = new Date(now); d0.setHours(0, 0, 0, 0);
     let n = 0;

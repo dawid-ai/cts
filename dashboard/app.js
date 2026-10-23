@@ -22,7 +22,7 @@ const GLYPH = { thinking: '◐', running: '▶', waiting: '⏸', done: '✓', fa
 
 const S = {
   moments: new Map(), threads: new Map(), arcs: [], sessions: [], header: null, summary: null, threshold: 50, root: '',
-  drafts: null, settings: null, sChanges: {}, events: new Map(), sid: null, sel: null, seen: new Set(), limit: 400, stick: true, newBelow: 0, activity: null, results: null, connected: false, loaded: false,
+  drafts: null, settings: null, sChanges: {}, comp: { format: '' }, voice: null, voiceOpen: null, events: new Map(), sid: null, sel: null, seen: new Set(), limit: 400, stick: true, newBelow: 0, activity: null, results: null, connected: false, loaded: false,
 };
 
 // ---------- URL state ----------
@@ -205,6 +205,9 @@ function schedule() { if (raf) return; raf = requestAnimationFrame(() => { raf =
 function render() {
   renderTabs(); renderStrip(); renderFilters();
   const main = $('#main');
+  // Rebuilding under a field you are typing in would lose your text: wait until it loses focus.
+  const ae = document.activeElement;
+  if (S.loaded && main.contains(ae) && ae.matches('textarea,input[type=text],input:not([type]),select')) { if (!S.held) { S.held = true; ae.addEventListener('blur', () => { S.held = false; schedule(); }, { once: true }); } return; }
   const keep = main.querySelector('.lanewrap');
   const scroll = keep ? { top: keep.scrollTop, left: keep.scrollLeft } : null;
   main.replaceChildren();
@@ -378,6 +381,7 @@ function moreFor(m) {
     h('button', { class: 'btn', onclick: () => act('dismiss', { target: m.id }, m.sid) }, 'Dismiss', h('kbd', {}, 'x')),
     ...(m.span.ids.length ? [h('button', { class: 'btn', onclick: () => openTranscript(m.tp.length ? m.tp[0].id : m.span.first) }, 'Transcript', h('kbd', {}, 't'))] : []),
     h('button', { class: 'btn', onclick: () => showEvidence(m.id) }, 'Saved evidence'),
+    h('button', { class: 'btn', onclick: () => composeFrom(m.id) }, 'Write a post'),
   );
   out.push(h('div', { class: 'mut mono', style: 'margin-top:6px' }, `${m.span.count} events · ${m.detector} · id ${m.id.slice(-10)}`), acts);
   return out;
@@ -477,6 +481,7 @@ function viewStory(main) {
     wrap.append(h('section', { class: 'arc' },
       h('div', { class: 'kick' }, `Chapter ${i + 1}`),
       h('h3', {}, a.title),
+      a.moments.length > 1 ? h('button', { class: 'btn arcw', onclick: () => composeFrom('arc:' + a.id) }, 'Write this chapter up') : null,
       h('div', { class: 'meta' }, h('span', { class: 'shape' }, a.shape), h('span', {}, dur(a.duration_ms) + ' · ' + fmtD(a.t0)), h('span', {}, `${a.sessions.length} session${a.sessions.length === 1 ? '' : 's'}`), h('span', {}, a.actors.map((x) => label(sidFor, x)).join(', ')), h('span', { style: a.status === 'closed' ? 'color:var(--ok)' : '' }, a.status === 'closed' ? 'shipped' : a.status === 'unfinished' ? 'unfinished business' : 'still open')),
       h('ol', {}, a.ms.map((m) => h('li', { style: `--c:var(--k-${m.kind})` }, cardEl(m, { inline: true }))))));
   });
@@ -610,10 +615,12 @@ function draftCard(d) {
   let when;
   const ta = editing ? h('textarea', { id: 'ed-' + d.id, rows: Math.min(18, 3 + d.text.split('\n').length), 'aria-label': 'Edit draft text' }, d.text) : null;
   const dec = S.declining === d.id ? h('input', { id: 'dr-' + d.id, placeholder: 'Why? (optional, feeds the drafter)', 'aria-label': 'Reason for declining', onkeydown: (e) => { if (e.key === 'Enter') { dpost({ op: 'decline', id: d.id, reason: e.target.value }); S.declining = null; } if (e.key === 'Escape') { S.declining = null; schedule(); } } }) : null;
-  return h('article', { class: 'draft st-' + d.status, style: `--c:var(--k-${d.kind || 'mark'})`, 'data-id': d.id, 'data-kind': 'd' },
+  const busy = S.comp.busyOn === d.id;
+  return h('article', { class: 'draft st-' + d.status + (S.comp.last === d.id ? ' new' : ''), style: `--c:var(--k-${d.kind || 'mark'})`, 'data-id': d.id, 'data-kind': 'd' },
     h('header', {},
       h('span', { class: 'ch' }, d.channel), d.format !== d.channel ? h('span', { class: 'tag' }, d.format) : null, h('span', { class: 'tag', style: 'color:var(--c)' }, d.kind || ''), h('span', { class: 'mut mono' }, d.score ? `score ${d.score}` : ''),
       h('span', { class: 'badge b-' + d.status }, d.status === 'approved' && d.approval && d.approval.at ? 'scheduled' : d.status), d.origin === 'autopilot' ? h('span', { class: 'tag' }, `autopilot · ${d.mode}`) : null,
+      h('span', { class: 'tag', title: d.writer === 'template' ? 'Written from plain templates' : 'Told by the storyteller model' }, d.writer === 'template' ? 'template' : [d.writer, d.tone, d.quotes ? 'my words' : null].filter(Boolean).join(' · ')),
       h('span', { class: 'grow' }), h('span', { class: 'mut' }, ago((Date.now() - d.created_t)) + ' ago' + (d.status === 'pending' ? ` · expires ${fmtD(d.expires_t)}` : ''))),
     m0 ? h('div', { class: 'src' }, 'from ', h('a', { href: `#/story`, onclick: (e) => { e.preventDefault(); S.sel = m0.id; setF({ view: 'story' }); } }, d.source.type === 'arc' ? `arc “${trunc(d.title || m0.headline, 80)}”` : `“${trunc(m0.headline, 90)}”`), m0.tp && m0.tp[0] ? [' · ', h('a', { href: '#', onclick: (e) => { e.preventDefault(); openTranscript(m0.tp[0].id); } }, 'transcript')] : null) : null,
     editing ? ta : h('div', { class: 'preview', 'aria-label': 'Preview exactly as it will be published' }, posts),
@@ -623,13 +630,96 @@ function draftCard(d) {
       bad ? h('div', { class: 'rep warn' }, 'Honesty guard: ', d.guard.problems.join(' · ')) : h('div', { class: 'rep ok' }, 'Honesty guard: every number and quote traces to the log')),
     d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`).join(' · ')) : null,
     d.status === 'declined' && d.declined.reason ? h('div', { class: 'mut' }, `Declined: ${d.declined.reason}`) : null,
+    d.status === 'replaced' ? h('div', { class: 'mut' }, 'Replaced by a rewrite') : null,
     d.status === 'approved' && d.approval ? h('div', { class: 'mut' }, d.approval.at ? `Approved, goes out at ${fmtDT(Date.parse(d.approval.at))}` : 'Approved, waiting for the publish queue') : null,
     open && !S.drafts.private ? h('footer', { class: 'acts' },
       editing ? [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'edit', id: d.id, text: $('#ed-' + d.id).value }); S.editing = null; if (r && r.suggestions && r.suggestions.length) toast('Voice suggestion waiting below'); schedule(); } }, 'Save edit'), h('button', { class: 'btn', onclick: () => { S.editing = null; schedule(); } }, 'Cancel')]
         : [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'approve', id: d.id }); if (r && r.held) toast('Approved. Held: ' + r.held); else if (r && r.published) toast('Published'); } }, bad ? 'Approve anyway' : 'Approve'),
           h('label', { class: 'sched' }, 'or at ', h('input', { type: 'datetime-local', 'aria-label': 'Publish at', onchange: (e) => { if (e.target.value) dpost({ op: 'approve', id: d.id, at: new Date(e.target.value).toISOString() }); } })),
           h('button', { class: 'btn', onclick: () => { S.editing = d.id; schedule(); setTimeout(() => { const t = $('#ed-' + d.id); if (t) t.focus(); }, 30); } }, 'Edit'),
-          dec || h('button', { class: 'btn', onclick: () => { S.declining = d.id; schedule(); setTimeout(() => { const t = $('#dr-' + d.id); if (t) t.focus(); }, 30); } }, 'Decline')]) : null);
+          dec || h('button', { class: 'btn', onclick: () => { S.declining = d.id; schedule(); setTimeout(() => { const t = $('#dr-' + d.id); if (t) t.focus(); }, 30); } }, 'Decline'),
+          h('span', { class: 'rw' }, busy ? `Rewriting… ${Math.round((Date.now() - S.comp.t0) / 1000)}s` : ['Rewrite:', ...TONES.map(([tn]) => h('button', { class: 'btn', disabled: !!S.comp.busyOn, title: `Tell it again in the ${tn} tone with ${writerName(compVia())}`, onclick: () => writePost({ source: d.source.id, channel: d.channel, format: d.format, via: compVia(), tone: tn, quotes: compQuotes(), replace: d.id }, d.id) }, tn))])]) : null);
+}
+// ---------- Writing posts ----------
+const TONES = [['plain', 'Dev-log facts, no build-up'], ['story', 'What I tried, what got in the way, what I decided'], ['dramatic', 'A hook, tension and a turn; only what the log shows']];
+const FORMATS = [['', 'Fits the channel'], ['short', 'Short post'], ['thread', 'Thread'], ['linkedin', 'LinkedIn post'], ['long', 'Article'], ['devlog', 'Dev-log lines']];
+const WRITERS = [['claude', 'Claude (your login)'], ['api', 'Claude API key'], ['template', 'Plain template, no model']];
+const writerName = (v) => (WRITERS.find((w) => w[0] === v) || [, v])[1];
+const compVia = () => S.comp.via || (S.drafts && S.drafts.writer.via && S.drafts.writer.via !== 'template' ? S.drafts.writer.via : 'claude');
+const compQuotes = () => S.comp.quotes ?? !!(S.drafts && S.drafts.writer.quotes);
+function composeFrom(source) {
+  Object.assign(S.comp, { source, replace: null, msg: null });
+  setF({ view: 'drafts' });
+  setTimeout(() => { const c = $('.compose'); if (c) c.scrollIntoView({ block: 'start', behavior: 'smooth' }); }, 60);
+}
+/** Ask the server for a draft. `on` is the draft being rewritten, or 'composer'. Model calls take a while: show the seconds. */
+async function writePost(b, on) {
+  const c = S.comp;
+  Object.assign(c, { busyOn: on, t0: Date.now(), msg: null });
+  const tick = setInterval(schedule, 1000); schedule();
+  try {
+    const r = await api('/api/draft', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify({ op: 'create', force: true, ...b }) });
+    c.last = r.id; if (on === 'composer') c.replace = null;
+    c.msg = r.fallback ? { warn: true, text: `${writerName(b.via)} wrote a version that broke a rule (${r.fallback}), so this is the plain template. Try again, or another tone.` }
+      : { text: b.via === 'template' ? 'Template draft written: it is in the queue below.' : `Written in the ${b.tone} tone: it is in the queue below. Nothing goes out until you approve it.` };
+    S.drafts = await api('/api/drafts');
+  } catch (e) {
+    const err = (e.body && e.body.error) || e.message;
+    c.msg = { warn: true, text: err, dup: /already exists/.test(err) ? b : null };
+  } finally {
+    clearInterval(tick); c.busyOn = null; schedule();
+    setTimeout(() => { const el = c.last && document.querySelector(`.draft[data-id="${c.last}"]`); if (el && !c.msg.warn) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, 80);
+  }
+}
+function composer(D) {
+  const c = S.comp, via = compVia(), model = via !== 'template';
+  c.channel = c.channel && D.channels.includes(c.channel) ? c.channel : D.channels.includes('x') ? 'x' : D.channels[0];
+  const tone = c.tone || D.writer.tone || 'story';
+  const arcs = S.arcs.filter((a) => a.moments.length > 1 && !a.demo).sort((a, b) => b.t0 - a.t0);
+  const ms = [...S.moments.values()].filter((m) => !['dismissed', 'merged', 'dropped'].includes(m.status) && m.kind !== 'wait').sort((a, b) => b.t0 - a.t0).slice(0, 80);
+  if (!c.source) c.source = arcs.length ? 'arc:' + arcs[0].id : ms.length ? ms[0].id : null;
+  const known = new Set([...arcs.map((a) => 'arc:' + a.id), ...ms.map((m) => m.id)]);
+  const opt = (v, text, cur) => h('option', { value: v, selected: v === cur }, text);
+  const pick = (label, sel) => h('label', {}, label, sel);
+  const busy = c.busyOn === 'composer', secs = Math.round((Date.now() - c.t0) / 1000);
+  const go = () => writePost({ source: c.source, channel: c.channel, format: c.format || undefined, via, tone, quotes: compQuotes(), replace: c.replace || undefined }, 'composer');
+  return h('section', { class: 'compose', 'aria-label': 'Write a post' },
+    h('div', {}, h('h2', { class: 'sec', style: 'margin:0' }, 'Write a post'), h('div', { class: 'mut' }, 'Pick a moment or a whole arc and how to tell it. The draft lands in the queue below; nothing goes out until you approve it.')),
+    h('div', { class: 'cgrid' },
+      pick('From', h('select', { 'aria-label': 'Moment or arc', onchange: (e) => { c.source = e.target.value; c.replace = null; e.target.blur(); } },
+        !c.source ? opt('', 'No moments yet', '') : null,
+        c.source && !known.has(c.source) ? opt(c.source, 'The draft’s source', c.source) : null,
+        arcs.length ? h('optgroup', { label: 'Arcs (a whole chapter)' }, arcs.map((a) => opt('arc:' + a.id, `${trunc(a.title, 70)} · ${a.moments.length} moments`, c.source))) : null,
+        ms.length ? h('optgroup', { label: 'Moments (newest first)' }, ms.map((m) => opt(m.id, `${m.kind} ${m.score} · ${trunc(m.headline, 70)}`, c.source))) : null)),
+      pick('Channel', h('select', { onchange: (e) => { c.channel = e.target.value; e.target.blur(); } }, D.channels.map((x) => opt(x, x, c.channel)))),
+      pick('Format', h('select', { onchange: (e) => { c.format = e.target.value; e.target.blur(); } }, FORMATS.map(([v, n]) => opt(v, n, c.format || '')))),
+      pick('Writer', h('select', { onchange: (e) => { c.via = e.target.value; e.target.blur(); } }, WRITERS.map(([v, n]) => opt(v, n, via))))),
+    h('div', { class: 'tones', role: 'radiogroup', 'aria-label': 'Tone' }, TONES.map(([v, help]) => h('button', { class: 'tone', role: 'radio', 'aria-checked': String(tone === v), disabled: !model, onclick: () => { c.tone = v; schedule(); } }, h('b', {}, v), h('span', {}, help)))),
+    h('label', { class: 'qopt' + (model ? '' : ' off') }, h('input', { type: 'checkbox', checked: compQuotes(), disabled: !model, onchange: (e) => { c.quotes = e.target.checked; } }), 'Let it quote my own words: up to 2 short lines per post, exact, from my prompts, after redaction'),
+    !model ? h('div', { class: 'mut' }, 'Tone and quotes need a model writer. The template tells each moment in one plain sentence.') : null,
+    h('div', { class: 'acts' },
+      h('button', { class: 'btn prim', disabled: !!c.busyOn || !c.source, onclick: go }, busy ? `Writing… ${secs}s` : c.replace ? 'Rewrite it' : 'Write it'),
+      c.replace && !busy ? h('button', { class: 'btn', onclick: () => { c.replace = null; schedule(); } }, 'Write a new one instead') : null,
+      busy && model ? h('span', { class: 'mut' }, `${writerName(via)} usually takes 20 to 90 seconds; the checks run after.`) : null),
+    c.msg && c.busyOn !== 'composer' ? h('div', { class: 'rep ' + (c.msg.warn ? 'warn' : 'ok') }, c.msg.text, c.msg.dup ? [' ', h('button', { class: 'btn', onclick: () => writePost({ ...c.msg.dup, replace: true }, 'composer') }, 'Rewrite that one')] : null) : null);
+}
+async function saveVoice() {
+  try { const r = await api('/api/voice', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify({ text: S.voice.text }) }); S.voice = { text: r.text, saved: true, dirty: false }; toast('Voice saved: the next draft uses it'); schedule(); } catch (e) { toast((e.body && e.body.error) || 'Save failed: ' + e.message); }
+}
+function voiceBox(D) {
+  const sg = D.suggestions.filter((s) => ['offered', 'accepted'].includes(s.status));
+  const offered = sg.filter((s) => s.status === 'offered').length;
+  const isOpen = S.voiceOpen ?? offered > 0;
+  if (isOpen && !S.voice) api('/api/voice').then((v) => { S.voice = { ...v, dirty: false }; schedule(); }).catch(() => {});
+  return h('details', { class: 'voice', open: isOpen, ontoggle: (e) => { if (S.voiceOpen !== e.target.open) { S.voiceOpen = e.target.open; schedule(); } } },
+    h('summary', {}, 'Voice profile', h('span', { class: 'mut' }, offered ? ` · ${offered} suggestion${offered === 1 ? '' : 's'} waiting` : ' · how every post should sound')),
+    ...sg.map((s) => h('div', { class: 'vs' }, h('span', {}, s.status === 'accepted' ? `Saved: ${s.key}: ${s.value}` : `Save “${s.key}: ${s.value}” to your voice? (${s.why})`),
+      s.status === 'offered' ? [h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-accept', id: s.id }).then(() => { S.voice = null; }) }, 'Save'), h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-reject', id: s.id }) }, 'No')] : h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-undo', id: s.id }).then(() => { S.voice = null; }) }, 'Undo'))),
+    isOpen ? (S.voice ? [
+      h('div', { class: 'mut' }, 'Sent to the storyteller with every draft. Paste two or three posts you wrote into Samples: that moves the tone more than any instruction. ', h('code', {}, 'never:'), ' words are blocked by the honesty guard.'),
+      h('textarea', { 'aria-label': 'Voice profile', spellcheck: 'false', oninput: (e) => { S.voice.text = e.target.value; S.voice.dirty = true; } }, S.voice.text),
+      h('div', { class: 'acts' }, h('button', { class: 'btn prim', onclick: saveVoice }, 'Save voice'), S.voice.dirty ? h('button', { class: 'btn', onclick: () => { S.voice = null; schedule(); } }, 'Discard') : null, !S.voice.saved ? h('span', { class: 'mut' }, 'Not saved yet: this is the starting template.') : null),
+    ] : h('div', { class: 'mut' }, 'Loading…')) : null);
 }
 function viewDrafts(main) {
   const D = S.drafts;
@@ -640,17 +730,12 @@ function viewDrafts(main) {
     h('button', { class: 'btn' + (D.paused ? ' on' : ''), 'aria-pressed': String(D.paused), onclick: () => dpost({ op: 'kill', on: !D.paused }) }, D.paused ? 'Publishing paused — resume' : 'Pause publishing'));
   wrap.append(top);
   if (D.private) wrap.append(h('div', { class: 'rep warn' }, 'This project is marked private in cts.json: drafting and publishing are disabled.'));
-  if (D.suggestions.some((s) => s.status === 'offered' || s.status === 'accepted')) {
-    wrap.append(h('div', { class: 'voice' }, h('b', {}, 'Voice profile'), ...D.suggestions.filter((s) => ['offered', 'accepted'].includes(s.status)).map((s) =>
-      h('div', { class: 'vs' }, h('span', {}, s.status === 'accepted' ? `Saved: ${s.key}: ${s.value}` : `Save “${s.key}: ${s.value}” to your voice? (${s.why})`),
-        s.status === 'offered' ? [h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-accept', id: s.id }) }, 'Save'), h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-reject', id: s.id }) }, 'No')] : h('button', { class: 'btn', onclick: () => dpost({ op: 'voice-undo', id: s.id }) }, 'Undo'))
-    )));
-  }
+  else wrap.append(composer(D), voiceBox(D));
   const open = D.drafts.filter((d) => d.status === 'pending' || d.status === 'approved');
   const done = D.drafts.filter((d) => !['pending', 'approved'].includes(d.status));
-  if (!open.length) wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No drafts waiting'), 'Drafts appear here when a moment crosses your autopilot bar. Draft one by hand with ', h('code', {}, 'cts draft <moment-id>'), '.'));
+  if (!open.length) wrap.append(h('div', { class: 'empty' }, h('b', {}, 'No drafts waiting'), 'Drafts appear here when a moment crosses your autopilot bar, or write one above.'));
   wrap.append(...open.map(draftCard));
-  if (done.length) wrap.append(h('details', { class: 'closed' }, h('summary', {}, `Published, declined, expired (${done.length})`), ...done.map(draftCard)));
+  if (done.length) wrap.append(h('details', { class: 'closed' }, h('summary', {}, `Published, declined, replaced, expired (${done.length})`), ...done.map(draftCard)));
   main.append(wrap);
 }
 

@@ -109,7 +109,20 @@ it has no quotation marks, no code, flags, file names or paths, no run of six wo
 placeholder, every number traces to the cited events, and it fits the channel (long text loses whole sentences from the end). One
 repair round, then the template draft is written instead and the CLI says why. The model is `drafts.model` (`claude-sonnet-5-5`; on real
 history Haiku added lessons and asides the log did not support). Whether a stated reason is true is not checked by code: that is what you
-review, or the `cts:reviewer` agent. Formats: short post, thread
+review, or the `cts:reviewer` agent.
+
+**Tone and quotes.** The storyteller has three tones (`drafts.tone`, `--tone`, or the dashboard): `plain` (dev-log facts), `story` (the
+default: what I tried, what got in the way, what I decided) and `dramatic` (open on the moment it went sideways, real tension, you and the
+agent as two characters, end on a turn; it dramatizes what the log shows and invents nothing). Quotes are off by default. With
+`drafts.quotes` (`--quotes`, or the dashboard checkbox) it may quote your own words: at most 2 quotes per post, each at most 15 words and an
+exact span of one of your prompts after redaction and consent. Agent text, commands, paths, test names and errors are never quotable, and
+a prompt you shared only as a summary (`cts consent`) can't be quoted at all.
+
+**From the dashboard.** The Drafts view has a **Write a post** panel: pick any moment or a whole arc (or use **Write a post** on a moment card or
+**Write this chapter up** on a Story chapter), the channel, the format, the writer, the tone and quotes, and the draft lands in the queue,
+with the seconds counting while the model writes. Each open draft has **Rewrite: plain · story · dramatic**: the new draft replaces the old one,
+which is closed as `replaced` (not declined, so autopilot doesn't count it against that kind). The **Voice profile** panel edits `.cts/voice.md`
+in place and lists the voice suggestions. Formats: short post, thread
 (arcs), LinkedIn, long Markdown with front matter, dev-log line, each with an optional SVG share card. Everything passes the redactor first
 and the preview shows masked text highlighted; the draft carries a redaction report and an honesty-guard result (numbers and quotes must trace
 to the cited events; your edits are checked too).

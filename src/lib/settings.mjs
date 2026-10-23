@@ -23,6 +23,8 @@ export const FIELDS = [
   { path: 'drafts.modes', section: 'Autopilot', label: 'Rules (key = mode)', type: 'modes', help: 'One per line: kind:channel, kind or channel = draft | notify | auto. Auto still needs a clean guard and nothing masked.' },
   { path: 'drafts.writer', section: 'Autopilot', label: 'Who writes drafts', type: 'enum', options: ['off', 'claude', 'api'], help: 'off = plain templates. claude (your Claude Code login) or api (ANTHROPIC_API_KEY) tells each draft as a story from redacted material; a story that fails the checks falls back to the template.' },
   { path: 'drafts.model', section: 'Autopilot', label: 'Storyteller model', type: 'text', max: 100 },
+  { path: 'drafts.tone', section: 'Autopilot', label: 'Storyteller tone', type: 'enum', options: ['plain', 'story', 'dramatic'], help: 'plain = dev-log facts; story = what I tried, what got in the way, what I decided; dramatic = a hook, tension and a turn, still only what the log shows.' },
+  { path: 'drafts.quotes', section: 'Autopilot', label: 'Let the storyteller quote my own words', type: 'bool', help: 'Up to 2 short quotes per post, exact words from your own prompts, after redaction and consent. Never agent text, commands, paths or errors.' },
   { path: 'drafts.expireDays', section: 'Autopilot', label: 'Pending drafts expire after (days)', type: 'int', min: 1, max: 90 },
   ...CHANNELS.flatMap((c) => [
     { path: `publishing.channels.${c}.cap`, section: 'Channels', label: `${c}: daily cap`, type: 'int', min: 0, max: 50 },

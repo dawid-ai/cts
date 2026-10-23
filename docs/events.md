@@ -40,7 +40,7 @@ Written by CTS itself (actor `extractor`, `cts`, `autopilot` or `human`); the en
 | `extract.merge` | `{target, into}` |
 | `extract.thread` | `{op: close\|open, thread?, text?, resolution?, cite}` |
 | `extract.run` | `{n, rejected}` |
-| `draft.create` | `{draft, source{type,id,moments}, channel, format, text, title, claims{refs,extra}, redaction{count,summary,items}, card, origin, score, kind, mode, voice_rev, writer}` (`writer`: `template`, `claude` or `api`) |
+| `draft.create` | `{draft, source{type,id,moments}, channel, format, text, title, claims{refs,extra}, redaction{count,summary,items}, card, origin, score, kind, mode, voice_rev, writer, tone, quotes, replaces}` (`writer`: `template`, `claude` or `api`; `tone`: `plain`, `story` or `dramatic` for a storyteller draft; `quotes`: it may quote the author's own prompts; `replaces`: the pending or approved draft this rewrite closes, which then reads as `replaced`) |
 | `draft.edit` | `{draft, text, removed[], redaction}` voids any approval |
 | `draft.approve` | `{draft, via: human\|autopilot, rule?, at?, text_hash}` only valid while `text_hash` matches the current text |
 | `draft.decline` | `{draft, reason}` |

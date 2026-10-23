@@ -115,6 +115,8 @@ export const DEFAULT_CONFIG = {
     unfinishedDays: 5,
     writer: false,              // false = templates | 'claude' (your login, claude -p) | 'api' (ANTHROPIC_API_KEY): a model tells the story
     model: 'claude-sonnet-5-5', // the storyteller's model (Haiku invents lessons and asides more often)
+    tone: 'story',              // the storyteller's tone: 'plain' | 'story' | 'dramatic'
+    quotes: false,              // let the storyteller quote my own prompt words (short, exact, redacted)
     modes: {},                  // 'draft' (default) | 'notify' | 'auto', keyed 'kind:channel', 'kind' or 'channel'
   },
   notify: { desktop: true, terminal: true }, // where 'notify'-mode drafts are announced; terminal = a line at session start

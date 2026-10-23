@@ -74,6 +74,21 @@ test('server: drafts API — list, approve/publish over HTTP with the CSRF guard
     d = JSON.parse((await get(s.port, '/api/drafts')).body);
     assert.equal(d.drafts[0].status, 'published'); assert.equal(d.paused, false);
     assert.equal((await post(s.port, '/api/draft', { op: 'nonsense' }, H)).status, 400);
+    // writing from the dashboard: a duplicate is refused until it is asked as a rewrite, which replaces the open draft
+    const src = d.drafts[0].source.id;
+    assert.match(JSON.parse((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template' }, H)).body).id, /^\w+$/);
+    assert.equal((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template' }, H)).status, 409);
+    const rw = JSON.parse((await post(s.port, '/api/draft', { op: 'create', source: src, channel: 'linkedin', via: 'template', replace: true }, H)).body);
+    d = JSON.parse((await get(s.port, '/api/drafts')).body);
+    assert.equal(d.drafts.filter((x) => x.channel === 'linkedin' && x.status === 'replaced').length, 1); assert.equal(d.drafts.find((x) => x.id === rw.id).status, 'pending');
+    assert.deepEqual(d.writer, { via: 'template', tone: 'story', quotes: false, model: 'claude-sonnet-5-5' });
+    // the voice profile: the template until saved; saving is guarded like every other write
+    const v0 = JSON.parse((await get(s.port, '/api/voice')).body); assert.equal(v0.saved, false); assert.match(v0.text, /# CTS voice/);
+    assert.equal((await post(s.port, '/api/voice', { text: 'max: 200\n' })).status, 403, 'no x-cts header');
+    assert.equal((await post(s.port, '/api/voice', { text: 'x'.repeat(20001) }, H)).status, 400);
+    assert.equal((await post(s.port, '/api/voice', { text: 'never: synergy\r\nmax: 200\n' }, H)).status, 200);
+    assert.equal(fs.readFileSync(p.voice, 'utf8'), 'never: synergy\nmax: 200\n');
+    assert.equal(JSON.parse((await get(s.port, '/api/voice')).body).saved, true);
   } finally { s.stop(); }
 });
 

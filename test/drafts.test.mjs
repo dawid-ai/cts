@@ -308,3 +308,67 @@ test('storyteller: threads are renumbered, articles keep their front matter, aut
   assert.equal((await N.autoStories(pr, { ask: async () => { throw new Error('not called'); } })).length, 0, 'nothing is asked twice');
   pr.close();
 });
+
+test('storyteller: tone sets the instructions; with quotes on, only short exact quotes of my own prompts pass, and the stored draft passes the guard', async () => {
+  const { pr } = brokeSetup();
+  const m = momentOf(pr, 'broke');
+  const src = N.resolveSource(pr, m.id), c = N.compose(pr, src, 'x', 'short');
+  assert.match(N.storyPacket(pr, src, c, 'x', 'short', { tone: 'dramatic' }).system, /dramatic and punchy[\s\S]*Never quote/);
+  assert.match(N.storyPacket(pr, src, c, 'x', 'short').system, /a story a peer would read/, 'story is the default tone');
+  const pk = N.storyPacket(pr, src, c, 'x', 'short', { tone: 'dramatic', quotes: true });
+  assert.match(pk.system, /quote MY OWN words/); assert.doesNotMatch(pk.system, /Never quote\./);
+  const probs = (text) => N.storyProblems(pr, text, { ...pk, format: 'short' });
+  assert.deepEqual(probs('I told it “the ratchet has to be even”. One test broke anyway. I kept the rounding, since even steps matter more here.'), []);
+  assert.ok(probs('It said “I kept the rounding and updated the test” and moved on.').some((x) => /not my own exact words/.test(x)), 'agent words are not quotable');
+  assert.ok(probs('I typed “npm test 2>&1 | tail -6” and it broke.').some((x) => /not my own|command/.test(x)));
+  assert.ok(probs('I said “one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen” there.').some((x) => /longer than 15/.test(x)));
+  assert.ok(N.storyProblems(pr, 'I told it “the ratchet has to be even”. One test broke.', { ...N.storyPacket(pr, src, c, 'x', 'short'), format: 'short' }).some((x) => /quotes/.test(x)), 'quotes off: no quotes at all');
+  const r = await N.writeStory(pr, m.id, { channel: 'x', tone: 'dramatic', quotes: true, ask: async (sys) => { assert.match(sys, /dramatic/); return JSON.stringify({ title: 'Even steps', text: 'One test broke. I had said "the ratchet has to be even", so I kept the rounding and fixed the test.' }); } });
+  assert.equal(r.writer, 'claude', JSON.stringify(r));
+  const d = pr.engine.drafts.get(r.id);
+  assert.match(d.text, /“the ratchet has to be even”/, 'straight quotes become curly'); assert.equal(d.tone, 'dramatic'); assert.equal(d.quotes, true);
+  assert.deepEqual(N.checkDraft(pr, d).problems, [], 'the quote traces to a cited event');
+  pr.close();
+});
+
+test('a rewrite replaces the draft it was asked for: closed as replaced (not declined), no duplicate error, and it survives a replay', () => {
+  const { root, pr } = setup();
+  const m = momentOf(pr, 'fight');
+  const a = N.createDraft(pr, m.id, { channel: 'x' }).id;
+  assert.match(N.createDraft(pr, m.id, { channel: 'x' }).error, /already exists/);
+  const b = N.createDraft(pr, m.id, { channel: 'x', replace: true }).id;
+  assert.ok(b && b !== a);
+  const old = pr.engine.drafts.get(a);
+  assert.equal(old.status, 'replaced'); assert.equal(old.replaced_by, b); assert.equal(pr.engine.drafts.declined.size, 0, 'no decline penalty');
+  assert.match(N.approve(pr, a).error, /replaced/); assert.match(N.edit(pr, a, 'x').error, /replaced/);
+  const c2 = N.createDraft(pr, m.id, { channel: 'x', replace: b }).id;
+  assert.equal(pr.engine.drafts.get(b).status, 'replaced');
+  assert.match(N.createDraft(pr, m.id, { channel: 'x', replace: a }).error, /pending or approved/);
+  pr.close();
+  const again = Project.open(root);
+  assert.deepEqual(['replaced', 'replaced', 'pending'], [a, b, c2].map((id) => again.engine.drafts.get(id).status));
+  again.close();
+});
+
+test('an arc told by the template says a repeated line once and a run of releases as its last one', () => {
+  const { pr } = setup({}, (s) => {
+    for (let i = 0; i < 3; i++) { s.adv(2); s.bash(`git commit -m "release ${i}"`, { git: { branch: 'main', subject: `release ${i}`, files: ['a.js'], stat: { files: 1, ins: 3 + i, del: 1 } } }); }
+  });
+  const arc = pr.engine.arcs().find((a) => a.moments.length > 2);
+  assert.ok(arc, 'an arc with several moments');
+  const d = pr.engine.drafts.get(N.createDraft(pr, 'arc:' + arc.id, { channel: 'linkedin' }).id);
+  const paras = d.text.split('\n\n');
+  assert.ok(paras.every((x, i) => i === 0 || x !== paras[i - 1]), d.text);
+  assert.ok(!paras.some((x, i) => /^Shipped it/.test(x) && /^Shipped it/.test(paras[i - 1] || '')), d.text);
+  pr.close();
+});
+
+test('a story over the limit loses whole sentences, and a version number is not a sentence end', async () => {
+  const { pr } = brokeSetup();
+  const m = momentOf(pr, 'broke');
+  const long = 'One test broke. ' + 'I kept going and the rounding stayed even after the fix. '.repeat(4) + 'It finally shipped as version 0.2.10 in the end.';
+  const r = await N.writeStory(pr, m.id, { channel: 'x', ask: async () => JSON.stringify({ title: 't', text: long }) });
+  const t = pr.engine.drafts.get(r.id).text;
+  assert.ok(t.length <= 280 && /fix\.$/.test(t) && !/version/.test(t), t);
+  pr.close();
+});

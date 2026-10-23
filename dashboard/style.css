@@ -163,6 +163,17 @@ mark{background:color-mix(in srgb,var(--human) 28%,transparent);color:inherit;bo
 .sched{font-size:.8rem;color:var(--mut)}.sched input{font:inherit;font-size:.8rem;background:var(--sunk);color:var(--ink);border:1px solid var(--line2);border-radius:8px;padding:2px 6px}
 .voice{background:var(--surface);border:1px dashed var(--line2);border-radius:12px;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
 .voice .vs{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.voice .vs span{flex:1;min-width:200px}
+.voice summary{cursor:pointer;font-weight:600}.voice textarea{width:100%;min-height:280px;box-sizing:border-box;font:.8rem/1.5 var(--mono);background:var(--sunk);color:var(--ink);border:1px solid var(--line2);border-radius:10px;padding:10px;resize:vertical}
+.compose{scroll-margin-top:72px;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.cgrid{display:grid;grid-template-columns:minmax(0,2.2fr) repeat(3,minmax(0,1fr));gap:8px}.cgrid label{display:flex;flex-direction:column;gap:3px;font-size:.75rem;color:var(--mut);min-width:0}.cgrid select{width:100%}
+.tones{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.tone{text-align:left;border:1px solid var(--line2);background:var(--surface);border-radius:10px;padding:7px 10px;display:flex;flex-direction:column;gap:2px}.tone span{font-size:.75rem;color:var(--mut)}
+.tone:hover{background:var(--sunk)}.tone[aria-checked=true]{border-color:var(--ink);box-shadow:inset 0 0 0 1px var(--ink)}.tone:disabled{opacity:.45;cursor:default}
+.qopt{font-size:.85rem;display:flex;gap:8px;align-items:center}.qopt.off{opacity:.45}.qopt input{width:16px;height:16px;flex:none}
+.draft.new{outline:2px solid var(--focus);outline-offset:2px}.draft.st-replaced{opacity:.72}.b-replaced{color:var(--mut)}
+.rw{display:inline-flex;gap:6px;align-items:center;font-size:.8rem;color:var(--mut);margin-left:auto;flex-wrap:wrap}
+.arc .arcw{float:right;margin-top:-30px}
+@media (max-width:640px){.cgrid{grid-template-columns:1fr 1fr}.cgrid label:first-child{grid-column:1/-1}.tone{align-items:center;padding:6px}.tone span{display:none}.rw{margin-left:0}.arc .arcw{float:none;margin:0 0 6px}}
 @media (max-width:640px){.drafts{gap:10px}.post{padding-bottom:24px}}
 
 .told{font-size:.8rem;color:var(--mut);margin-top:6px}.told a{color:var(--focus)}
