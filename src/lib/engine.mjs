@@ -1,6 +1,6 @@
 // The signal layer, Tier 1: deterministic detectors, threads, sessions and arcs.
 // Pure and replayable: feed it the same ordered events and you get the same moments (that is what `cts reindex` relies on).
-import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk, writtenFiles, wholeSuite } from './parse.mjs';
+import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk, writtenFiles, wholeSuite, maskedBuildFailure } from './parse.mjs';
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
@@ -352,7 +352,8 @@ export class Engine {
     if (d.tool === 'EnterWorktree' && !fail) this.emit(S, 'pivot', [ev], { headline: 'Started a worktree to try another path', actors: [ev.actor] });
 
     const tst = this.testOf(ev);
-    const red = tst && tst.red != null ? tst.red : fail;
+    // A build that failed behind `| tail` or `|| true` exits 0; its output still says so.
+    const red = tst && tst.red != null ? tst.red : fail || (d.tool === 'Bash' && !!maskedBuildFailure(i.command, d.out));
     const key = this.failKey(ev, tst);
     if (red) {
       S.stats.fails++;

@@ -246,3 +246,23 @@ export function writtenFiles(cmd) {
   }
   return [...out].slice(0, 20);
 }
+// Build, typecheck, compile and install tools, anchored at the start of a segment (after `npx` and the like).
+const BUILD_TOOL = /^(?:tsc\b|(?:npm|pnpm|yarn|bun)\s+(?:(?:-w|--workspace)\s+\S+\s+)?(?:(?:run\s+)?(?:build|typecheck|type-check|tsc|lint|check|compile)\b|i\b|install\b|ci\b|add\b)|cargo\s+(?:build|check|clippy|run)\b|go\s+(?:build|vet|run)\b|make\b(?!\s+(?:test|check)\b)|gradle\w*\s|\.\/gradlew\s|mvn\s|mypy\b|pyright\b|ruff\b|vite\s+build\b|next\s+build\b|webpack\b|rollup\b|esbuild\b|pip3?\s+install\b|python3?\s+-m\s+(?:build|mypy|pip\s+install)\b|dotnet\s+build\b|swift\s+build\b|gcc\b|g\+\+|clang\b)/;
+// Lines only a failed build prints: TypeScript and rustc codes, npm's error prefix, a Python traceback, `file:line: error:`.
+const BUILD_FAIL = /^.*\berror TS\d{4,5}:.*$|^error(?:\[E\d{4}\])?: .*$|^npm ERR! .*$|^npm error .*$|^Traceback \(most recent call last\):$|^\S+:\d+(?::\d+)?: (?:fatal )?error: .*$|^(?:Build failed|error during build).*$/m;
+/**
+ * A build whose failure a pipe or `|| true` hid: the command's first real segment is a build tool, its exit code is not the
+ * command's, and the output has a line only a failed build prints. Returns that line, or null. `grep "error TS"` never counts.
+ */
+export function maskedBuildFailure(cmd, out) {
+  const parts = skeleton(cmd).split(/\s*(&&|\|\||;|\n|\|)\s*/);
+  for (let i = 0; i < parts.length; i += 2) {
+    const seg = parts[i].trim().replace(SEG_PREFIX, '');
+    if (!seg || /^cd\s/.test(seg)) continue;
+    if (!BUILD_TOOL.test(seg.replace(RUNNER_PREFIX, ''))) return null;
+    if (i === parts.length - 1 || parts[i + 1] === '&&') return null;   // the exit code is the tool's (or the chain stops on failure)
+    const m = BUILD_FAIL.exec(String(out || ''));
+    return m ? m[0].trim().slice(0, 200) : null;
+  }
+  return null;
+}

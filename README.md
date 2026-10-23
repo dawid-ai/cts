@@ -58,6 +58,8 @@ session's first prompt topic for topic, so the same crash report counts but the 
 `detour` 45 (a side quest: after a real failure, a turn edits a part of the code it hadn't touched and the prompt doesn't name;
 tests, docs and config files don't count).
 Test verdicts come from the runner's own output (counts, then failure lines), so `npm test | tail` still reads as red.
+The same goes for builds: when a build, typecheck or install tool's exit code is hidden by a pipe or `|| true`, a line only
+a failed build prints (`error TS2345:`, `error[E0382]:`, `npm ERR!`, a Python traceback, `file:3: error:`) makes it a failure.
 Scores, the fight threshold and the main-branch globs are configurable in `.cts/cts.json`:
 
 ```json

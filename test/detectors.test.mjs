@@ -457,3 +457,15 @@ test('repeated request: the same ask after the agent had a turn is frustration; 
   const both = ask('add a dark mode toggle to the settings page', 'ugh, add the dark mode toggle to the settings page');
   assert.equal(both.moments.find((m) => m.kind === 'frustration').score, 55, 'impatient and repeated');
 });
+
+test('masked build failures: tsc or a build behind `| tail` that printed errors counts as a failed attempt; grep for the same text does not', async () => {
+  const TS = 'src/a.ts(3,5): error TS2345: Argument of type number is not assignable\nFound 1 error.';
+  const r = run((s) => { s.start(); for (let i = 0; i < 3; i++) { s.bash('npx tsc --noEmit 2>&1 | tail -20', { out: TS }); s.adv(2); } s.bash('npx tsc --noEmit 2>&1 | tail -20', { out: '' }); });
+  assert.match(r.moments.find((m) => m.kind === 'fight').headline, /^3 failed attempts at npx tsc --noEmit/);
+  assert.ok(!has(run((s) => { s.start(); for (let i = 0; i < 4; i++) s.bash('grep -rn "error TS" src | tail', { out: TS }); s.bash('grep -rn "error TS" src | tail', { out: '' }); }), 'fight'));
+  const { maskedBuildFailure: b } = await import('../src/lib/parse.mjs');
+  assert.equal(b('cargo build 2>&1 | tail', 'error[E0382]: borrow of moved value'), 'error[E0382]: borrow of moved value');
+  assert.equal(b('npm install left-pad || true', 'npm ERR! code E404'), 'npm ERR! code E404');
+  assert.equal(b('python3 -m mypy src | tail', 'src/a.py:3: error: Incompatible types'), 'src/a.py:3: error: Incompatible types');
+  for (const [c, o] of [['npx tsc --noEmit', TS], ['npx tsc && echo ok', TS], ['npm run build | tail', 'built in 2s'], ['cat build.log | tail', TS]]) assert.equal(b(c, o), null, c);
+});
