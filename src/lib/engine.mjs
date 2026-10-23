@@ -1,6 +1,6 @@
 // The signal layer, Tier 1: deterministic detectors, threads, sessions and arcs.
 // Pure and replayable: feed it the same ordered events and you get the same moments (that is what `cts reindex` relies on).
-import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk, writtenFiles } from './parse.mjs';
+import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk, writtenFiles, wholeSuite } from './parse.mjs';
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
@@ -112,7 +112,22 @@ export class Engine {
       last: last && { id: last.id, headline: last.headline, kind: last.kind, score: last.score },
       pending_drafts: this.drafts.pendingCount(),
       pending_extract: [...this.moments.values()].filter((m) => m.tier === 1 && !m.extracted && !m.demo && (m.status === 'auto' || m.status === 'confirmed') && m.kind !== 'mark' && this.score(m) >= this.cfg.threshold).length,
+      recap: this.recap(),
     };
+  }
+  /**
+   * Where the latest session you worked in left off, for the next session's start: your last request, tests whose latest
+   * run was red, failure streaks still open, problems that keep coming back, and a closing question you never answered.
+   */
+  recap() {
+    const S = [...this.sessions.values()].filter((x) => !x.demo && !x.headless && x.lastPrompt).sort((a, b) => b.end - a.end)[0];
+    if (!S) return null;
+    const failing = [...(S.tests || new Map()).values()].filter((x) => x.red).map((x) => ({ seg: trunc(x.seg, 80), fail: x.fail || null, names: x.names.slice(0, 3) }));
+    const streaks = [...this.warm.values()].filter((w) => w.sid === S.sid && !w.done && !w.key.startsWith('test:')).map((w) => w.headline).slice(-3);
+    const recurring = [...this.moments.values()].filter((m) => m.sid === S.sid && m.kind === 'recurring' && m.status !== 'dismissed').map((m) => m.headline).slice(-2);
+    // Only the closing message's last paragraph: a question in the middle of a long answer is not one left hanging.
+    const tail = S.lastStop && S.lastStop.t > S.lastPrompt.t ? String(S.lastStop.text || '').trim().split(/\n\s*\n/).pop().trim() : '';
+    return { sid: S.sid, end: S.end, prompt: trunc(S.lastPrompt.text.trim().split('\n')[0], 160), failing, streaks, recurring, question: /\?\s*$/.test(tail) ? trunc(tail, 200) : null };
   }
 
   // ---------- core ----------
@@ -166,7 +181,7 @@ export class Engine {
       case 'tool.post': case 'tool.fail': this.onPost(S, ev, t); break;
       case 'subagent.start': this.setStatus(S, ev.actor, 'thinking', 'starting'); break;
       case 'subagent.stop': this.onMessage(S, ev, t, true); this.setStatus(S, ev.actor, 'done', 'finished'); break;
-      case 'turn.end': this.onMessage(S, ev, t, false); this.setStatus(S, 'main', 'waiting', 'waiting on you'); if (DEFERRAL_RE.test(d.last || '')) this.hedgeFrom(S, ev, t, d.last); break;
+      case 'turn.end': if (ev.actor === 'main') S.lastStop = { text: d.last, t }; this.onMessage(S, ev, t, false); this.setStatus(S, 'main', 'waiting', 'waiting on you'); if (DEFERRAL_RE.test(d.last || '')) this.hedgeFrom(S, ev, t, d.last); break;
       case 'turn.fail': this.setStatus(S, 'main', 'failed', 'turn failed'); break;
       case 'compact.pre': break;
       case 'compact.post': S.cut = { t, ev, rereads: [], emitted: false, before: new Set(S.reads) }; break;
@@ -265,6 +280,7 @@ export class Engine {
     // The session's first request, or an error pasted into any prompt, seen in an earlier session.
     const ask = !S.asked && PROBLEM_RE.test(text) ? { text, topics: promptTopics(text) } : null;
     S.asked = true;
+    S.lastPrompt = { text, t };
     S.turn = { ev, topics: new Set([...promptTopics(text), ...topicsOf(text)]), areas: new Set(), red: null, off: new Map(), done: false };
     this.recurCheck(S, ev, t, { errors: errorSigs(text), ask });
     this.hedgeFrom(S, ev, t, text);
@@ -458,6 +474,9 @@ export class Engine {
   }
 
   onTest(S, ev, tst, key, red, t) {
+    // A green run of the whole suite settles every narrower run that failed before it.
+    if (!red && wholeSuite(tst.seg)) S.tests = new Map();
+    (S.tests ||= new Map()).set(key, { seg: tst.seg, red, fail: tst.fail, names: red ? failedTests(ev.d.out) : [] });
     if (!red) { S.lastGreen.set(key, { ev, total: tst.total || 0 }); return; }
     this.recurCheck(S, ev, t, { tests: failedTests(ev.d.out) });
     const g = S.lastGreen.get(key);

@@ -414,3 +414,32 @@ test('detour: after a real failure, two edits in an area the turn had not touche
   // A new prompt is a new turn.
   assert.ok(!has(quest('add retries to the uploader', (s) => { s.prompt('now look at auth'); E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); }), 'detour'));
 });
+
+test('recap: the latest real session, its last request, red tests, open streaks, recurring problems and an unanswered closing question', () => {
+  const { eng } = run((s) => {
+    s.sid = 'a'; s.start(); s.prompt('fix the limiter'); s.bash('npm test', { ok: false, out: NODE_RED }); s.adv(60 * 24);
+    s.sid = 'b'; s.start(); s.prompt('make the limiter pass again\nmore detail');
+    s.bash('npm test', { ok: false, out: NODE_RED }); s.bash('npm run lint', { out: 'ℹ pass 1\nℹ fail 0' });
+    s.bash('npm run build', { ok: false, out: 'Error: Cannot find module x' }); s.bash('npm run build', { ok: false, out: 'Error: Cannot find module x' });
+    s.stop('I changed the refill.\n\nShould I keep the old refill logic?'); s.adv(60);
+    s.sid = 'c'; s.demo = true; s.start(); s.prompt('demo'); s.demo = false;
+  });
+  const r = eng.recap();
+  assert.equal(r.sid, 'b');
+  assert.equal(r.prompt, 'make the limiter pass again');
+  assert.deepEqual(r.failing, [{ seg: 'npm test', fail: null, names: ['refills tokens'] }]);
+  assert.deepEqual(r.streaks, ['2 failed attempts at npm run build so far']);
+  assert.match(r.recurring[0], /^Failing again: refills tokens/);
+  assert.equal(r.question, 'Should I keep the old refill logic?');
+  // Green again, an answered question, or a question mid-answer: nothing left hanging.
+  const done = run((s) => { s.start(); s.prompt('fix it'); s.bash('npm test', { ok: false, out: NODE_RED }); s.bash('npm test', { out: 'ℹ pass 3\nℹ fail 0' }); s.stop('Is this right? I checked.\n\nAll green now.'); }).eng.recap();
+  assert.deepEqual([done.failing, done.question], [[], null]);
+  const narrow = run((s) => { s.start(); s.prompt('fix it'); s.bash('node --test --test-name-pattern="refill" test/a.test.mjs', { ok: false, out: NODE_RED }); s.bash('npm test', { out: 'ℹ pass 3\nℹ fail 0' }); }).eng.recap();
+  assert.deepEqual(narrow.failing, [], 'a green whole-suite run settles a narrower red one');
+});
+
+test('wholeSuite: the runner alone (or with flags) is the whole suite; files, packages and name filters narrow it', async () => {
+  const { wholeSuite: w } = await import('../src/lib/parse.mjs');
+  for (const s of ['npm test', 'npm run test', 'pnpm -w x test', 'node --test', 'node --test-concurrency=1 --test', 'go test ./...', 'cargo test', 'pytest -x -q', 'npx vitest run', 'npm test -- --coverage']) assert.ok(w(s), s);
+  for (const s of ['node --test test/a.test.mjs', 'node --test --test-name-pattern="x"', 'pytest tests/test_a.py', 'pytest -k refill', 'go test ./pkg/limiter', 'npx vitest run src/a.test.ts', 'jest -t refill', 'cargo test refill']) assert.ok(!w(s), s);
+});

@@ -32,7 +32,9 @@ Uninstall with `claude plugin uninstall cts`. Hooks go with the plugin; `.cts/` 
 
 Hooks (all command hooks, async except `SessionStart`) append one checksummed JSONL line per event to
 `.cts/sessions/<session_id>.jsonl`. They never call a model, never block a tool and print nothing, except that
-`SessionStart` injects a short note listing open threads and the last moment. A failing hook logs to `.cts/hooks.log`.
+`SessionStart` injects a short note listing open threads and the last moment. On a fresh start or `/clear` it also
+recaps where the last session left off: your last request, tests whose latest run was red (a green whole-suite run settles
+narrower ones), failure streaks still open, problems that keep coming back, and a closing question you never answered. A failing hook logs to `.cts/hooks.log`.
 
 Registered: SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, PostToolUseFailure, PostToolBatch, SubagentStart,
 SubagentStop, Stop, StopFailure, PreCompact, PostCompact, PreModelSwitch, PostModelSwitch, SessionEnd, Notification,

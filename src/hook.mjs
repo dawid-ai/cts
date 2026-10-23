@@ -34,10 +34,20 @@ function startServer(root, p) {
   child.unref();
 }
 
-function contextNote(p) {
+function contextNote(p, inp) {
   const c = readJson(p.context);
   if (!c) return null;
   const lines = [];
+  // A fresh start or /clear gets the recap; a resumed or compacted session already holds that context.
+  const r = c.recap;
+  if (r && r.sid !== inp.session_id && ['startup', 'clear', undefined].includes(inp.source)) {
+    const when = ago(Date.now() - r.end);
+    lines.push(`Where the last session (${when === 'just now' ? when : when + ' ago'}) left off. The user last asked: "${r.prompt}"`);
+    for (const f of r.failing || []) { const why = [f.fail ? `${f.fail} failing` : '', (f.names || []).join('; ')].filter(Boolean).join(': '); lines.push(`- Tests still failing at the end: ${f.seg}${why ? ` (${why})` : ''}`); }
+    for (const s of r.streaks || []) lines.push(`- Unresolved: ${s}`);
+    for (const h of r.recurring || []) lines.push(`- A problem that keeps coming back: ${h}`);
+    if (r.question) lines.push(`- The last answer ended on a question the user never answered: "${r.question}"`);
+  }
   if (c.threads && c.threads.length) {
     lines.push(`CTS project log: ${c.threads.length} open thread${c.threads.length === 1 ? '' : 's'}:`);
     for (const t of c.threads.slice(0, 8)) lines.push(`- (${ago(Date.now() - Date.parse(t.opened_ts))} old, opened by ${t.opened_by}) ${t.text}`);
@@ -76,7 +86,7 @@ try {
     try { gitMode(root); } catch (e) { logFail(root, e); }
     startServer(root, p);
     const paused = fs.existsSync(p.paused);
-    const note = paused ? null : contextNote(p);
+    const note = paused ? null : contextNote(p, inp);
     let hint = null;
     try { hint = tip(root); } catch (e) { logFail(root, e); }
     const msg = [paused ? null : userLine(root, p), hint].filter(Boolean).join('\n') || null;

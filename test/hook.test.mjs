@@ -146,6 +146,21 @@ test('SessionStart injects open threads and the last moment as additional contex
   assert.match(out.hookSpecificOutput.additionalContext, /evaluator rejected plan/);
 });
 
+test('SessionStart recaps where the last session left off, on a fresh start only', () => {
+  const root = proj();
+  fs.mkdirSync(paths(root).cts, { recursive: true });
+  const recap = { sid: 'old', end: Date.now() - 2 * 3600e3, prompt: 'make the limiter pass', failing: [{ seg: 'npm test', fail: 2, names: ['refills tokens'] }], streaks: ['2 failed attempts at npm run build so far'], recurring: [], question: 'Should I keep the old refill logic?' };
+  fs.writeFileSync(paths(root).context, JSON.stringify({ threads: [], recap }));
+  const ctx = (src) => { const r = fire(root, { hook_event_name: 'SessionStart', source: src }); return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : ''; };
+  const note = ctx('startup');
+  assert.match(note, /Where the last session \(2h ago\) left off\. The user last asked: "make the limiter pass"/);
+  assert.match(note, /Tests still failing at the end: npm test \(2 failing: refills tokens\)/);
+  assert.match(note, /Unresolved: 2 failed attempts at npm run build so far/);
+  assert.match(note, /never answered: "Should I keep the old refill logic\?"/);
+  assert.match(ctx('clear'), /left off/);
+  for (const src of ['resume', 'compact']) assert.doesNotMatch(ctx(src), /left off/, src);
+});
+
 test('hook overhead: median time CTS adds per event on top of Node startup stays under 50 ms', () => {
   // The acceptance budget is 100 ms per event. Node's own startup varies by platform (about 70-200 ms on Windows), so the
   // test checks what CTS adds, with runs interleaved with bare Node so background load hits both sides equally.

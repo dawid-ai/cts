@@ -46,6 +46,15 @@ export function testSegment(cmd) {
   }
   return null;
 }
+// Name filters and file arguments narrow a run; without them it is the whole suite.
+const NARROW = /\s(?:--test-name-pattern|--testNamePattern|-t|-k|--grep|-g|-run|--filter|-m)\b/;
+/** Whether a test segment runs the whole suite: no name filter and no positional (file or package) argument after the runner. */
+export function wholeSuite(seg) {
+  const s = String(seg || '').replace(RUNNER_PREFIX, '').replace(/\s+--(?=\s|$)/, ' ');
+  if (NARROW.test(s + ' ')) return false;
+  const rest = s.replace(/^(?:(?:npm|pnpm|yarn|bun)\s+(?:(?:-w|--workspace)\s+\S+\s+)?(?:run\s+)?test|node\s+(?:--[\w-]+(?:=\S+)?\s+)*--test|go\s+test|cargo\s+(?:test|nextest(?:\s+run)?)|dotnet\s+test|make\s+(?:test|check)|py\.?test|vitest(?:\s+run)?|jest|rspec|tox)\b/, '');
+  return !rest.split(/\s+/).some((a) => a && !a.startsWith('-') && !/^(?:''|""|\.\/\.\.\.|\.\.\.|\.)$/.test(a));
+}
 export function testRunner(cmd) { const t = testSegment(cmd); return t ? t.runner : null; }
 // A failure line survives `| tail`: node's `✖ failing tests:` and assertion details come after its summary.
 const FAIL_MARK = /^\s*(?:FAIL|FAILED|×|✗|✕|✖)\s|^\s*Tests?:?\s+\d+ failed|\bAssertionError\b|\bERR_ASSERTION\b|^--- FAIL|^not ok \d/m;
