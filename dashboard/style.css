@@ -2,7 +2,7 @@
   --bg:#f6f4f0;--surface:#fff;--sunk:#efece6;--ink:#1d1c1a;--mut:#67635c;--line:#ddd8cd;--line2:#cfc9bc;
   --human:#c0480f;--l1:#4f7585;--l2:#6c8a5a;--l3:#8a6a9b;--l4:#9a7d32;--l5:#2f8179;--l6:#a05f5f;
   --ok:#2f7d55;--bad:#b83a3a;--focus:#1f5fd1;--shadow:0 1px 2px rgba(30,28,24,.06),0 4px 14px rgba(30,28,24,.05);
-  --k-fight:#c0480f;--k-reversal:#9a7d00;--k-disagreement:#a2437f;--k-shipped:#2f7d55;--k-broke:#b83a3a;--k-pivot:#2f66b0;--k-memory-cut:#6e5fb0;--k-refusal:#b0652f;--k-wait:#6b7580;--k-escalation:#2a8585;--k-misread:#8a5a2f;--k-frustration:#a83a5a;--k-recurring:#7a3fa0;--k-mark:#a88700;--k-theory:#7a5ca8;--k-workaround:#3a7f9e;--k-learned:#5f8a2f;
+  --k-fight:#c0480f;--k-reversal:#9a7d00;--k-disagreement:#a2437f;--k-shipped:#2f7d55;--k-broke:#b83a3a;--k-pivot:#2f66b0;--k-memory-cut:#6e5fb0;--k-refusal:#b0652f;--k-wait:#6b7580;--k-escalation:#2a8585;--k-misread:#8a5a2f;--k-frustration:#a83a5a;--k-recurring:#7a3fa0;--k-detour:#3d7a6a;--k-mark:#a88700;--k-theory:#7a5ca8;--k-workaround:#3a7f9e;--k-learned:#5f8a2f;
   --sans:"Segoe UI Variable","Segoe UI",Seravek,"Gill Sans Nova",Ubuntu,Calibri,"DejaVu Sans",sans-serif;
   --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace;
 }
@@ -10,7 +10,7 @@
   --bg:#121211;--surface:#1a1a18;--sunk:#0e0e0d;--ink:#ecebe6;--mut:#a09c93;--line:#2c2b28;--line2:#3a3935;
   --human:#f08a56;--l1:#7fa3b3;--l2:#97b385;--l3:#b79bc7;--l4:#c9ae62;--l5:#6fb5ac;--l6:#c98f8f;
   --ok:#5fbf8a;--bad:#e06b6b;--focus:#7aa7ff;--shadow:0 1px 2px rgba(0,0,0,.4),0 6px 18px rgba(0,0,0,.35);
-  --k-fight:#f08a56;--k-reversal:#d9b93a;--k-disagreement:#d07cb0;--k-shipped:#5fbf8a;--k-broke:#e06b6b;--k-pivot:#6e9be0;--k-memory-cut:#9d90e0;--k-refusal:#e0955f;--k-wait:#9aa4af;--k-escalation:#5fc0c0;--k-misread:#d4a36e;--k-frustration:#e0708f;--k-recurring:#b783d6;--k-mark:#e8c547;--k-theory:#b99be0;--k-workaround:#6bb5d6;--k-learned:#9bcb6a;
+  --k-fight:#f08a56;--k-reversal:#d9b93a;--k-disagreement:#d07cb0;--k-shipped:#5fbf8a;--k-broke:#e06b6b;--k-pivot:#6e9be0;--k-memory-cut:#9d90e0;--k-refusal:#e0955f;--k-wait:#9aa4af;--k-escalation:#5fc0c0;--k-misread:#d4a36e;--k-frustration:#e0708f;--k-recurring:#b783d6;--k-detour:#6fc2a8;--k-mark:#e8c547;--k-theory:#b99be0;--k-workaround:#6bb5d6;--k-learned:#9bcb6a;
 }}
 *{box-sizing:border-box}
 html{color-scheme:light dark}

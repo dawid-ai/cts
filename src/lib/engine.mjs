@@ -4,13 +4,15 @@ import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySeg
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
-export const BASE = { reversal: 60, fight: 40, disagreement: 70, shipped: 65, broke: 65, pivot: 55, 'memory-cut': 50, refusal: 50, wait: 20, escalation: 45, mark: 100, misread: 55, frustration: 45, recurring: 55, theory: 50, workaround: 50, learned: 50 };
+export const BASE = { reversal: 60, fight: 40, disagreement: 70, shipped: 65, broke: 65, pivot: 55, 'memory-cut': 50, refusal: 50, wait: 20, escalation: 45, mark: 100, misread: 55, frustration: 45, recurring: 55, detour: 45, theory: 50, workaround: 50, learned: 50 };
 export const TIER2_KINDS = ['theory', 'workaround', 'learned'];
 export const KINDS = Object.keys(BASE);
 const MIN = 60000;
 const DAY = 86400000;
 const HUMAN = new Set(['mark', 'confirm', 'dismiss', 'rescore', 'merge', 'thread.close']);
 // A shell command's relative path joined to the event's cwd, with `.` and `..` resolved.
+// Files that ride along with any change (tests, docs, config, dotfiles): never the start of a side quest.
+const COMPANION = /(?:^|\/)(?:tests?|__tests__|spec|docs?|\.[^/]+)\/|\.(?:test|spec)\.\w+$|\.(?:md|mdx|txt|rst|json|lock|ya?ml|toml|ini|cfg|conf)$|(?:^|\/)\.[^/]*$/i;
 const absPath = (cwd, f) => {
   if (/^(?:\/|~|[A-Za-z]:)/.test(f) || !cwd) return f;
   const out = [];
@@ -18,7 +20,7 @@ const absPath = (cwd, f) => {
   return out.join('/');
 };
 // Hotspots: moments that count against the files they touched (or the files written in the 30 minutes before them).
-const STRUGGLE = new Set(['fight', 'broke', 'recurring', 'escalation', 'memory-cut']);
+const STRUGGLE = new Set(['fight', 'broke', 'recurring', 'escalation', 'memory-cut', 'detour']);
 const CORRECTION = new Set(['reversal', 'refusal', 'misread', 'frustration', 'disagreement']);
 
 const REFUSAL_LEAD = /^\s*(?:no[,.!\s]+(?:don'?t|do not|stop|not)|don'?t|do not|stop\b|i don'?t want|not that|never mind)/i;
@@ -263,6 +265,7 @@ export class Engine {
     // The session's first request, or an error pasted into any prompt, seen in an earlier session.
     const ask = !S.asked && PROBLEM_RE.test(text) ? { text, topics: promptTopics(text) } : null;
     S.asked = true;
+    S.turn = { ev, topics: new Set([...promptTopics(text), ...topicsOf(text)]), areas: new Set(), red: null, off: new Map(), done: false };
     this.recurCheck(S, ev, t, { errors: errorSigs(text), ask });
     this.hedgeFrom(S, ev, t, text);
     if (DECISIVE_RE.test(text)) this.closeByTopics(S, ev, t, topicsOf(text), 'decision');
@@ -312,7 +315,7 @@ export class Engine {
       if (!fail) for (const th of this.threads.values()) if (!th.closed && th.key === d.tool_use_id) this.closeThread(th, ev, t, 'answered');
       S.waitMark = null;
     }
-    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(d.tool) && !fail) { const f = i.file_path || i.notebook_path; if (f) { S.writes.set(f, t); this.touch(S, f, t); } }
+    if (['Write', 'Edit', 'MultiEdit', 'NotebookEdit'].includes(d.tool) && !fail) { const f = i.file_path || i.notebook_path; if (f) { S.writes.set(f, t); this.touch(S, f, t, ev); } }
     if (d.tool === 'Read' && !fail) this.onRead(S, ev, t, i.file_path);
     if (d.tool === 'EnterWorktree' && !fail) this.emit(S, 'pivot', [ev], { headline: 'Started a worktree to try another path', actors: [ev.actor] });
 
@@ -337,16 +340,43 @@ export class Engine {
         S.fails.delete(key);
       }
     }
+    // A real failure (a red test run, or a command that printed an error, not `grep` finding nothing) can start a side quest.
+    if (red && d.tool === 'Bash' && S.turn && !S.turn.red && S.turn.areas.size && (tst || errorSigs(d.out).length || /\b(?:error|failed|exception|traceback|panicked)\b/i.test(d.out || ''))) S.turn.red = ev;
     // A failed call on a file counts against it; a red test run counts against the files written just before it.
     if (red) for (const f of d.tool === 'Bash' ? (tst ? this.nearFiles(S, t) : []) : [i.file_path || i.notebook_path].filter(Boolean)) this.fileStat(S, f, 1, t);
     if (tst && tst.red != null) this.onTest(S, ev, tst, key, red, t);
     else if (red && d.tool === 'Bash') this.recurCheck(S, ev, t, { errors: errorSigs(d.out) });
     if (d.git && !fail) this.onGit(S, ev, t);
-    if (d.tool === 'Bash' && !fail) { this.onBash(S, ev, t); for (const f of writtenFiles(i.command)) this.touch(S, absPath(ev.cwd, f), t); }
+    if (d.tool === 'Bash' && !fail) { this.onBash(S, ev, t); for (const f of writtenFiles(i.command)) this.touch(S, absPath(ev.cwd, f), t, ev); }
   }
 
   /** A file this session wrote, by an edit tool or a shell command: counted for hotspots and remembered for `nearFiles`. */
-  touch(S, f, t) { S.touched.delete(f); S.touched.set(f, t); if (S.touched.size > 500) S.touched.delete(S.touched.keys().next().value); this.fileStat(S, f, 0, t); }
+  touch(S, f, t, ev) { S.touched.delete(f); S.touched.set(f, t); if (S.touched.size > 500) S.touched.delete(S.touched.keys().next().value); this.fileStat(S, f, 0, t); this.detourCheck(S, ev, f); }
+  /**
+   * A side quest: after a real failure, a turn starts editing an area (first two directory levels) it had not touched,
+   * that the prompt does not name. Two edits there make the moment, once per turn. Companion files never count.
+   */
+  detourCheck(S, ev, f) {
+    const T = S.turn, cwd = String(ev.cwd || '').replace(/\\/g, '/').replace(/\/$/, ''), x = String(f).replace(/\\/g, '/');
+    if (!T || T.done || !cwd || !x.startsWith(cwd + '/')) return;
+    const rel = x.slice(cwd.length + 1), parts = rel.split('/');
+    if (COMPANION.test(rel)) return;
+    const area = parts.length > 1 ? parts.slice(0, Math.min(2, parts.length - 1)).join('/') : '';
+    if (!T.red) { T.areas.add(area); return; }
+    const words = [...area.split(/[/_.-]/), ...parts[parts.length - 1].replace(/\.\w+$/, '').split(/[_.-]/)].map((w) => w.toLowerCase()).filter((w) => w.length >= 3);
+    if (T.areas.has(area) || words.some((w) => T.topics.has(w)) || T.topics.has(parts[parts.length - 1].toLowerCase())) return;
+    const o = T.off.get(area) || { evs: [], files: new Set(), abs: new Set() };
+    o.evs.push(ev); o.files.add(rel); o.abs.add(x); T.off.set(area, o);
+    if (o.evs.length < 2) return;
+    T.done = true;
+    const from = [...T.areas].map((a) => a || 'the top level'), to = area || 'the top level', r = T.red;
+    this.emit(S, 'detour', [r, ...o.evs], {
+      headline: `Side quest: a failure while working in ${trunc(from.join(', '), 50)} led to edits in ${to}`,
+      body: [`${o.files.size === 1 ? 'One file' : `${o.files.size} files`} outside the request's area changed after the failure: ${trunc([...o.files].join(', '), 160)}.`],
+      files: [...o.abs], actors: [...new Set([r, ...o.evs].map((e) => e.actor))],
+      evidence: { from, to, files: [...o.files], prompt: trunc(T.ev.d.text, 300), command: trunc((r.d.input || {}).command || '', 200), error: trunc(r.d.out || '', 500) },
+    });
+  }
   /** Files written in this session in the 30 minutes before `t`, newest first (at most 8). */
   nearFiles(S, t) { return [...S.touched].filter(([, w]) => w <= t && t - w <= 30 * MIN).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f]) => f); }
   /**
@@ -836,7 +866,7 @@ export class Engine {
       const kinds = new Set(list.map((m) => m.kind));
       const lastShip = [...list].reverse().find((m) => m.kind === 'shipped');
       const outcome = lastShip && lastShip === list[list.length - 1] ? lastShip : lastShip || null;
-      const struggle = list.some((m) => ['fight', 'broke', 'refusal', 'reversal', 'memory-cut', 'escalation', 'misread', 'frustration', 'recurring'].includes(m.kind));
+      const struggle = list.some((m) => ['fight', 'broke', 'refusal', 'reversal', 'memory-cut', 'escalation', 'misread', 'frustration', 'recurring', 'detour'].includes(m.kind));
       const days = (list[list.length - 1].t1 - list[0].t0) / DAY;
       const agentActors = new Set(list.flatMap((m) => m.actors).filter((a) => a.startsWith('agent:')));
       let shape;

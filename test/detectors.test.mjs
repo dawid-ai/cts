@@ -384,5 +384,33 @@ test('writtenFiles: redirects, tee, sed -i, perl -pi and script writes, joined t
   assert.deepEqual(w("cat > notes.md <<'EOF'\nhello > not-a-file\nEOF"), ['notes.md']);
   assert.deepEqual(w("python3 - <<'EOF'\np='src/a.mjs'; s=open(p).read()\nopen(p,'w').write(s)\nopen(\"b.txt\", 'a')\nEOF"), ['b.txt', 'src/a.mjs']);
   assert.deepEqual(w("npm test 2>&1 | tee test.log; perl -pi -e 's/a/b/' x.pl"), ['test.log', 'x.pl']);
+  assert.deepEqual(w("cat >> a.mjs <<'EOF'\n// open('f', 'w') in source text is not run\nEOF"), ['a.mjs']);
+  assert.deepEqual(w(`node -e "const f = 'x.json'; fs.writeFileSync(f, s)"`), ['x.json']);
   for (const c of ['sed -n 1,5p a.js', 'echo hi >> /tmp/x; ls > /dev/null 2>&1', 'echo $X > "$OUT"', "python3 -c \"p=open('a').read()\"", 'cmd >&2', 'cd $S && sed -i x h2']) assert.deepEqual(w(c), [], c);
+});
+
+test('detour: after a real failure, two edits in an area the turn had not touched and the prompt does not name', () => {
+  const E = (s, f) => s.call('Edit', { file_path: `/work/app/${f}` });
+  const quest = (prompt, after, { fail = { ok: false, out: JEST_RED(1) }, cmd = 'npm test' } = {}) => run((s) => {
+    s.start(); s.prompt(prompt);
+    E(s, 'src/upload/client.js'); E(s, 'src/upload/retry.js'); s.adv(1);
+    s.bash(cmd, fail); s.adv(1);
+    after(s);
+  });
+  const r = quest('add retries to the uploader', (s) => { E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); E(s, 'src/auth/token.js'); });
+  const d = r.moments.filter((m) => m.kind === 'detour');
+  assert.equal(d.length, 1, 'one per turn');
+  assert.match(d[0].headline, /^Side quest: a failure while working in src\/upload led to edits in src\/auth$/);
+  assert.deepEqual(d[0].evidence.files, ['src/auth/token.js', 'src/auth/session.js']);
+  assert.deepEqual(d[0].files, ['/work/app/src/auth/token.js', '/work/app/src/auth/session.js']);
+  // Not a side quest: the prompt names the area, only companion files change, one edit, or the turn's own area.
+  assert.ok(!has(quest('add retries to the uploader and refresh the auth token', (s) => { E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); }), 'detour'));
+  assert.ok(!has(quest('add retries to the uploader', (s) => { E(s, 'test/upload.test.js'); E(s, 'README.md'); E(s, 'docs/retries.md'); E(s, 'package.json'); }), 'detour'));
+  assert.ok(!has(quest('add retries to the uploader', (s) => { E(s, 'src/auth/token.js'); }), 'detour'));
+  assert.ok(!has(quest('add retries to the uploader', (s) => { E(s, 'src/upload/client.js'); E(s, 'src/upload/queue.js'); }), 'detour'));
+  // `grep` finding nothing is not a failure; a red run before any edit gives the turn no focus yet.
+  assert.ok(!has(quest('add retries to the uploader', (s) => { E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); }, { cmd: 'grep -rn retry src', fail: { ok: false, out: '' } }), 'detour'));
+  assert.ok(!has(run((s) => { s.start(); s.prompt('fix the failing upload test'); s.bash('npm test', { ok: false, out: JEST_RED(1) }); E(s, 'src/upload/client.js'); E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); }), 'detour'));
+  // A new prompt is a new turn.
+  assert.ok(!has(quest('add retries to the uploader', (s) => { s.prompt('now look at auth'); E(s, 'src/auth/token.js'); E(s, 'src/auth/session.js'); }), 'detour'));
 });

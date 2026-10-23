@@ -226,7 +226,7 @@ body.still footer{display:none}.brandline{color:var(--mut);font:12px ui-monospac
 </style></head><body><header><b>CTS</b><span id="ttl"></span><span id="clock"></span></header><main id="lanes"><div id="cards" aria-live="polite"></div></main>
 <footer><button id="pp" aria-label="Play or pause">Pause</button><input id="sc" type="range" min="0" max="1000" value="0" aria-label="Scrub"><select id="sp" aria-label="Speed"><option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option></select><span class="brandline">captured with CTS · redacted</span></footer>
 <script>const D=${json};
-const K={fight:'#f08a56',reversal:'#d9b93a',disagreement:'#d07cb0',shipped:'#5fbf8a',broke:'#e06b6b',pivot:'#6e9be0','memory-cut':'#9d90e0',refusal:'#e0955f',wait:'#9aa4af',escalation:'#5fc0c0',misread:'#d4a36e',frustration:'#e0708f',recurring:'#b783d6',mark:'#e8c547',theory:'#b99be0',workaround:'#6bb5d6',learned:'#9bcb6a'};
+const K={fight:'#f08a56',reversal:'#d9b93a',disagreement:'#d07cb0',shipped:'#5fbf8a',broke:'#e06b6b',pivot:'#6e9be0','memory-cut':'#9d90e0',refusal:'#e0955f',wait:'#9aa4af',escalation:'#5fc0c0',misread:'#d4a36e',frustration:'#e0708f',recurring:'#b783d6',detour:'#6fc2a8',mark:'#e8c547',theory:'#b99be0',workaround:'#6bb5d6',learned:'#9bcb6a'};
 const LC=['#f08a56','#7fa3b3','#97b385','#b79bc7','#c9ae62','#6fb5ac'];
 const $=s=>document.querySelector(s),dur=Math.max(1,D.t1-D.t0);let cur=0,playing=true,last=0;
 $('#ttl').textContent=D.title;const L=$('#lanes');L.style.gridTemplateColumns='repeat('+D.lanes.length+',1fr)';

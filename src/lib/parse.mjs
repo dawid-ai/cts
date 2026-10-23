@@ -209,6 +209,7 @@ export function sameAsk(a, b) {
   const B = new Set(b), shared = a.filter((x) => B.has(x)).length;
   return shared >= 5 && shared / (a.length + b.length - shared) >= 0.8 && (shared === a.length || shared === b.length);
 }
+const INTERP = /^(?:python3?|node|ruby|perl|bun|deno)\b/;
 /** Files a shell command plainly writes (`> f`, `>> f`, `tee`, `sed -i`, `perl -pi`, `open('f', 'w')`, `writeFileSync('f'`), joined to its `cd`. Temp and device paths are left out. */
 export function writtenFiles(cmd) {
   const out = new Set(), raw = String(cmd || '');
@@ -222,11 +223,17 @@ export function writtenFiles(cmd) {
     if (/^tee\s/.test(seg)) args.forEach(add);
     else if (/^(?:sed\s+(?:-\S+\s+)*-[a-zA-Z]*i|perl\s+(?:-\S+\s+)*-p?i)/.test(seg)) args.forEach(add);
   }
-  for (const m of raw.matchAll(/\b(?:open\(\s*(['"])([^'"\n]+)\1\s*,\s*['"][wa]|writeFileSync\(\s*(['"])([^'"\n]+)\3)/g)) add(m[2] || m[4]);
-  // `p = 'src/x.mjs'` … `open(p, 'w')`: the variable's nearest quoted assignment before the write.
-  for (const m of raw.matchAll(/\b(?:open\(\s*([A-Za-z_]\w*)\s*,\s*['"][wa]|writeFileSync\(\s*([A-Za-z_]\w*)\s*,)/g)) {
-    const v = m[1] || m[2], set = [...raw.slice(0, m.index).matchAll(new RegExp(`(?:^|[\\s;(])(?:const\\s+|let\\s+)?${v}\\s*=\\s*(['"])([^'"\\n]+)\\1`, 'g'))].pop();
-    if (set) add(set[2]);
+  // Script writes count only in code an interpreter runs: a heredoc fed to it, or its -c/-e argument (not `cat > f <<EOF` source text).
+  const scripts = [];
+  for (const m of raw.matchAll(/^([^\n]*?)<<-?\s*(["']?)(\w+)\2[^\n]*\n([\s\S]*?)\n\s*\3(?=\n|$)/gm)) if (INTERP.test(m[1].split(/&&|\|\||;|\|/).pop().trim().replace(SEG_PREFIX, ''))) scripts.push(m[4]);
+  for (const m of raw.matchAll(/(?:^|[;&|(]\s*)(?:python3?|node|ruby|perl|bun|deno)\s+(?:-\S+\s+)*?-[ce]\s+(["'])([\s\S]*?)\1/g)) scripts.push(m[2]);
+  for (const code of scripts) {
+    for (const m of code.matchAll(/\b(?:open\(\s*(['"])([^'"\n]+)\1\s*,\s*['"][wa]|writeFileSync\(\s*(['"])([^'"\n]+)\3)/g)) add(m[2] || m[4]);
+    // `p = 'src/x.mjs'` … `open(p, 'w')`: the variable's nearest quoted assignment before the write.
+    for (const m of code.matchAll(/\b(?:open\(\s*([A-Za-z_]\w*)\s*,\s*['"][wa]|writeFileSync\(\s*([A-Za-z_]\w*)\s*,)/g)) {
+      const v = m[1] || m[2], set = [...code.slice(0, m.index).matchAll(new RegExp(`(?:^|[\\s;(])(?:const\\s+|let\\s+)?${v}\\s*=\\s*(['"])([^'"\\n]+)\\1`, 'g'))].pop();
+      if (set) add(set[2]);
+    }
   }
   return [...out].slice(0, 20);
 }

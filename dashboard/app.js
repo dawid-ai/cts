@@ -15,7 +15,7 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
-const KINDS = ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'pivot', 'memory-cut', 'refusal', 'wait', 'escalation', 'misread', 'frustration', 'recurring', 'mark', 'theory', 'workaround', 'learned'];
+const KINDS = ['fight', 'reversal', 'disagreement', 'shipped', 'broke', 'pivot', 'memory-cut', 'refusal', 'wait', 'escalation', 'misread', 'frustration', 'recurring', 'detour', 'mark', 'theory', 'workaround', 'learned'];
 const STRUGGLE_NOT = new Set(['shipped']);
 const VIEWS = [['live', 'Live'], ['story', 'Story'], ['threads', 'Threads'], ['sessions', 'Sessions'], ['hotspots', 'Hotspots'], ['drafts', 'Drafts'], ['settings', 'Settings']];
 const GLYPH = { thinking: '◐', running: '▶', waiting: '⏸', done: '✓', failed: '✕' };

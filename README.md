@@ -52,7 +52,9 @@ Tier 1 detectors run deterministically as events arrive: `reversal` 60, `fight` 
 `misread` 55 (you say "I meant ..."), `frustration` 45 (your own words lose patience; both +10 right after a confident
 "done"), `recurring` 55+10 per earlier session (max 85: a problem from an earlier session is back, as the same failing
 test, the same error line with paths and numbers normalized, or a first prompt that names a problem and matches an earlier
-session's first prompt topic for topic, so the same crash report counts but the same template about another process doesn't).
+session's first prompt topic for topic, so the same crash report counts but the same template about another process doesn't),
+`detour` 45 (a side quest: after a real failure, a turn edits a part of the code it hadn't touched and the prompt doesn't name;
+tests, docs and config files don't count).
 Test verdicts come from the runner's own output (counts, then failure lines), so `npm test | tail` still reads as red.
 Scores, the fight threshold and the main-branch globs are configurable in `.cts/cts.json`:
 

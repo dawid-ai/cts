@@ -85,7 +85,7 @@ ${chapters || '<p class="lede">No moments above the score threshold yet.</p>'}
 }
 
 export const CARD_SIZES = { x: [1200, 675], linkedin: [1200, 627], og: [1200, 630], square: [1080, 1080] };
-const KIND_HUE = { fight: '#d9622b', reversal: '#c9a227', disagreement: '#b0508f', shipped: '#4a9d6f', broke: '#c94a4a', pivot: '#4a82c9', 'memory-cut': '#8a7bc4', refusal: '#c97a4a', wait: '#7d8590', escalation: '#4aa6a6', misread: '#a8723f', frustration: '#c45a78', recurring: '#9a5fc0', mark: '#e8c547' };
+const KIND_HUE = { fight: '#d9622b', reversal: '#c9a227', disagreement: '#b0508f', shipped: '#4a9d6f', broke: '#c94a4a', pivot: '#4a82c9', 'memory-cut': '#8a7bc4', refusal: '#c97a4a', wait: '#7d8590', escalation: '#4aa6a6', misread: '#a8723f', frustration: '#c45a78', recurring: '#9a5fc0', detour: '#3d8a74', mark: '#e8c547' };
 
 function wrap(text, n) {
   const words = String(text).split(/\s+/); const lines = []; let cur = '';
