@@ -242,7 +242,7 @@ function decoration(pr, src, format, { angle = '', kind } = {}) {
   const top = src.type === 'arc' ? src.ms.slice().sort((a, b) => b.score - a.score)[0] : src.m;
   const vals = tagValues(pr, { sid: top.sid, angle, kind: kind || top.kind });
   const intro = fillTags(D.intro, vals).trim(), outro = fillTags(D.outro, vals).trim();
-  return { intro, outro, nums: [...`${intro} ${outro}`.matchAll(/\d+/g)].map((m) => +m[0]) };
+  return { intro, outro, nums: [...`${intro} ${outro}`.matchAll(/\d+(?:\.\d+)?/g)].flatMap((m) => [m[0], ...m[0].split('.')]) };
 }
 /** Characters a story must leave free for the intro and signature (the angle is not known yet: the longest one is assumed). */
 const reserveFor = (pr, src, format) => {
@@ -547,12 +547,12 @@ export function maybeAutoApprove(pr, id) {
   return true;
 }
 
-export function approve(pr, id, { at, via = 'human', rule } = {}) {
+export function approve(pr, id, { at, via = 'human', rule, to } = {}) {
   const x = pr.engine.drafts.get(id);
   if (!x) return { error: 'no such draft' };
   if (!['pending', 'approved'].includes(x.status)) return { error: `draft is ${x.status}` };
   if (pr.engine.drafts.statusOf(x) === 'expired') return { error: 'draft expired; ask for a fresh one with cts draft --force' };
-  writeHumanEvent(pr.root, 'draft.approve', { draft: x.id, via, rule: rule || null, at: at || null, text_hash: textHash(x.text) }, { sid: x.sid, actor: via === 'autopilot' ? 'autopilot' : 'human' });
+  writeHumanEvent(pr.root, 'draft.approve', { draft: x.id, via, rule: rule || null, at: at || null, text_hash: textHash(x.text), ...(to ? { to } : {}) }, { sid: x.sid, actor: via === 'autopilot' ? 'autopilot' : 'human' });
   pr.sync();
   return { id: x.id };
 }

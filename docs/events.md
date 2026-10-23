@@ -44,6 +44,7 @@ Written by CTS itself (actor `extractor`, `cts`, `autopilot` or `human`); the en
 | `draft.skip` | `{source, channel, format, why, worth_it}`: the autopilot storyteller passed on this source (`worth_it` false) or its story failed the checks (`worth_it` true); not asked again unless forced |
 | `draft.discard` | `{draft, reason}`: a pending or approved draft thrown away (the dashboard's Remove); unlike `draft.decline` it teaches autopilot nothing |
 | `draft.restore` | `{draft}`: a discarded draft back to pending |
+| `draft.approve` `to` | optional `"vista"`: the approval is for Post It (Vista Social), and the file queue leaves it alone |
 | `draft.edit` | `{draft, text, removed[], redaction}` voids any approval |
 | `draft.approve` | `{draft, via: human\|autopilot, rule?, at?, text_hash}` only valid while `text_hash` matches the current text |
 | `draft.decline` | `{draft, reason}` |

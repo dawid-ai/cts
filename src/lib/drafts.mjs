@@ -47,7 +47,7 @@ export class DraftStore {
       case 'draft.approve': {
         const x = this.drafts.get(d.draft); if (!x || ['published', 'declined', 'replaced', 'discarded'].includes(x.status)) break;
         if (d.text_hash !== textHash(x.text)) break;   // approval of text that is no longer the draft: void
-        x.status = 'approved'; x.approval = { event: ev.id, ts: ev.ts, t, actor: ev.actor, via: d.via || 'human', rule: d.rule || null, at: d.at || null, text_hash: d.text_hash };
+        x.status = 'approved'; x.approval = { event: ev.id, ts: ev.ts, t, actor: ev.actor, via: d.via || 'human', rule: d.rule || null, at: d.at || null, text_hash: d.text_hash, to: d.to || null };
         break;
       }
       case 'draft.decline': {

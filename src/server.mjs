@@ -12,10 +12,10 @@ import { buildStoryHtml } from './lib/share.mjs';
 import * as N from './lib/narrative.mjs';
 import * as PB from './lib/publish.mjs';
 import { loadVoice, acceptSuggestion, undoSuggestion, VOICE_TEMPLATE } from './lib/voice.mjs';
-import { postsOf } from './lib/drafts.mjs';
+import { postsOf, textHash } from './lib/drafts.mjs';
 import { notifyDrafts } from './lib/notify.mjs';
 import { companionData } from './lib/companion.mjs';
-import { getSettings, applySettings } from './lib/settings.mjs';
+import { getSettings, applySettings, setVistaProfile } from './lib/settings.mjs';
 import { TAGS, tagValues } from './lib/tags.mjs';
 import * as VS from './lib/vista.mjs';
 import { AutoExtractor } from './lib/autoextract.mjs';
@@ -52,6 +52,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
       return { ...d, posts: (d.format === 'thread' ? postsOf(d.text) : [d.text.trim()]).map((t) => ({ text: t, chars: t.length })), limit: ch.limit || null, guard: chk, mode: N.modeFor(pr, d.kind, d.channel), cap: ch.cap ?? null, publishedToday: store.publishedToday(d.channel) };
     });
     return { drafts: list, suggestions: [...store.suggestions.values()], paused: PB.isPaused(pr), counts: N.counts(pr), channels: Object.keys(pr.cfg.publishing.channels || {}), private: !!pr.cfg.private, version: store.version,
+      vista: { connected: VS.status().connected, as: Object.fromEntries(Object.entries(pr.cfg.publishing.channels || {}).filter(([, c]) => c.vista && c.vista.profile_id).map(([k, c]) => [k, c.vista.name || String(c.vista.profile_id)])) },
       writer: { via: pr.cfg.drafts.writer || 'template', tone: N.toneOf(pr.cfg.drafts.tone), quotes: !!pr.cfg.drafts.quotes, model: pr.cfg.drafts.model } };
   };
   let sentVersion = -1, lastQueue = 0, actual = null, lastAutoCheck = 0;
@@ -107,6 +108,7 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
   try { if (!pr.cfg.private) drafting(); } catch (e) { fs.appendFileSync(p.hooklog, `${new Date().toISOString()} autopilot: ${e.stack}\n`); }
   const timer = setInterval(tick, tickMs);
 
+  const posting = new Set();
   const json = (res, code, obj) => { const b = JSON.stringify(obj); res.writeHead(code, { 'content-type': 'application/json', 'cache-control': 'no-store' }); res.end(b); };
   const body = (req) => new Promise((ok, no) => { let s = ''; req.on('data', (c) => { s += c; if (s.length > 1e6) no(new Error('too large')); }); req.on('end', () => { try { ok(s ? JSON.parse(s) : {}); } catch (e) { no(e); } }); });
 
@@ -175,6 +177,16 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
           case 'edit': r = N.edit(pr, b.id, b.text); break;
           case 'decline': r = N.decline(pr, b.id, b.reason || ''); break;
           case 'publish': { const x = PB.publishDraft(pr, b.id); r = x.ok ? x : { error: x.reason }; break; }
+          case 'post-it': {
+            // Post It: your approval of exactly this text, for Vista Social, then the post. One at a time per draft.
+            if (posting.has(b.id)) { r = { error: 'already posting this one' }; break; }
+            const x = pr.engine.drafts.get(b.id);
+            if (!x) { r = { error: 'no such draft' }; break; }
+            if (!(x.status === 'approved' && x.approval && x.approval.to === 'vista' && x.approval.text_hash === textHash(x.text))) { const a = N.approve(pr, x.id, { to: 'vista' }); if (a.error) { r = a; break; } }
+            posting.add(x.id);
+            try { const p = await PB.postToVista(pr, x.id); r = p.ok ? p : { error: p.reason }; } finally { posting.delete(x.id); }
+            break;
+          }
           case 'kill': PB.setKillSwitch(pr, !!b.on); r = { ok: true }; break;
           case 'voice-accept': { const sg = pr.engine.drafts.suggestions.get(b.id); if (!sg) { r = { error: 'no such suggestion' }; break; } acceptSuggestion(root, sg); writeHumanEvent(root, 'voice.accept', { id: sg.id }, { actor: 'human' }); r = { ok: true }; break; }
           case 'voice-reject': writeHumanEvent(root, 'voice.reject', { id: b.id }, { actor: 'human' }); r = { ok: true }; break;
@@ -195,6 +207,13 @@ export async function startServer({ root, port, quiet = false, idleMs = 3600e3, 
           if (b.op === 'connect') return json(res, 200, { url: await VS.beginOAuth(`http://localhost:${actual}/oauth/vista/callback`) });
           if (b.op === 'link') { const r = VS.setLink(b.url); return json(res, r.error ? 400 : 200, r.error ? r : VS.status()); }
           if (b.op === 'disconnect') { VS.disconnect(); return json(res, 200, VS.status()); }
+          if (b.op === 'profiles') {
+            const net = PB.VISTA_NETWORK[b.channel || 'x'];
+            const r = await (await VS.session()).call('findProfiles', { fields: ['id', 'name', 'network_code', 'username', 'status'], limit: 200 });
+            const all = JSON.parse((r.content || []).map((c) => c.text || '').join('') || '[]');
+            return json(res, 200, { profiles: (Array.isArray(all) ? all : all.profiles || []).filter((x) => !net || x.network_code === net).map((x) => ({ id: x.id, name: x.name, username: x.username, status: x.status })) });
+          }
+          if (b.op === 'use') { const r = setVistaProfile(root, b.channel || 'x', b.profile_id ? { profile_id: b.profile_id, name: b.name } : null); pr.cfg = loadConfig(root); sentVersion = -1; tick(); return json(res, r.error ? 400 : 200, r); }
           if (b.op === 'tools') { const s = await VS.session(); return json(res, 200, { tools: (await s.tools()).map((t) => ({ name: t.name, description: t.description || '' })) }); }
           return json(res, 400, { error: 'unknown Vista Social operation' });
         } catch (e) { return json(res, 502, { error: String(e.message || e) }); }

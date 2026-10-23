@@ -114,6 +114,16 @@ export function coerce(f, v) {
   }
 }
 
+/** Which Vista Social profile a channel posts as ({profile_id, name}, or null to forget it), kept in the project's cts.json. */
+export function setVistaProfile(root, channel, v) {
+  if (!CHANNELS.includes(channel)) return { error: `unknown channel ${channel}` };
+  const next = readJson(paths(root).config, {}) || {};
+  set(next, `publishing.channels.${channel}.vista`, v && Number.isInteger(+v.profile_id) ? { profile_id: +v.profile_id, name: String(v.name || '').slice(0, 120) } : undefined);
+  const file = paths(root).config, tmp = file + '.tmp';
+  fs.writeFileSync(tmp, JSON.stringify(next, null, 2) + '\n'); fs.renameSync(tmp, file);
+  return { ok: true };
+}
+
 /** Apply `changes` ({path: value|null}) to the project config. All or nothing: any error and the file is untouched. */
 export function applySettings(root, changes) {
   const errors = [], next = readJson(paths(root).config, {}) || {};

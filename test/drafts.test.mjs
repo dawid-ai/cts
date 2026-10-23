@@ -465,3 +465,11 @@ test('remove and restore: a removed draft is discarded and can come back as pend
   assert.match(N.restore(pr, id).error, /pending/);
   pr.close();
 });
+
+test('a decimal from a tag (session hours) traces like any other number', () => {
+  const { pr } = setup({ drafts: { outro: '{session_hours} h in.' } });
+  const d = pr.engine.drafts.get(N.createDraft(pr, momentOf(pr, 'fight').id, { channel: 'x' }).id);
+  assert.match(d.text, /\d+\.\d h in\.$/, d.text);
+  assert.deepEqual(N.checkDraft(pr, d).problems, []);
+  pr.close();
+});

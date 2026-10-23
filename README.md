@@ -151,7 +151,13 @@ it from your latest session. The storyteller is told to leave room for both, and
 
 **Vista Social.** Settings, Vista Social: **Connect Vista Social** signs in with OAuth (the callback is the local dashboard), or save a key
 link (https, vistasocial.com). The credentials stay in `~/.cts/vista.json` (mode 600), never in the log; `cts vista status|tools|link|disconnect`
-does the same from a terminal. `src/lib/vista.mjs` is CTS's only network code, and it runs only when you connect, list tools, or post.
+does the same from a terminal. `src/lib/vista.mjs` is CTS's only network code, and it runs only when you connect, list tools or profiles,
+or post. Choose which X profile to post as (Settings, Vista Social, Choose X profile; kept in the project's `cts.json` as
+`publishing.channels.x.vista`). Then every X post or thread in the queue has **Post It!**: after a confirm showing the exact text, it records
+your approval of that text for Vista Social (`draft.approve` with `to: "vista"`), and posts it now with `createOrUpdatePost` (a thread's
+first post, the rest as reply comments). The receipt keeps the Vista post id. The same gates apply as for files (kill switch, daily cap,
+exact-text approval, no double post), only your own approval counts (never autopilot or an auto rule), the file queue leaves Vista approvals
+alone, and a failed post keeps the approval so Post It can retry.
 
 **What "published" means in this version.** Apart from Vista Social, there are no network adapters. Approving writes the exact text to
 `.cts/outbox/<channel>/*.txt` (X, Bluesky, Mastodon, Threads, LinkedIn: you or a scheduler take it from there), to a Markdown file with front

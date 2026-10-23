@@ -606,6 +606,22 @@ async function dpost(body) {
 }
 const postsOfText = (t) => String(t).split(/\n\s*---\s*\n/).map((x) => x.trim()).filter(Boolean);
 const maskedText = (t) => { const out = []; let last = 0; for (const m of t.matchAll(/\[(?:redacted|repo|masked|email|path|host|url|internal-url|ip)\]/g)) { out.push(t.slice(last, m.index), h('mark', { title: 'masked by the redactor' }, m[0])); last = m.index + m[0].length; } out.push(t.slice(last)); return out; };
+/** Post It: approve exactly this text for Vista Social and post it now. Shown on X posts and threads once a profile is chosen. */
+function postIt(d, bad) {
+  const V = S.drafts.vista || {}, as = V.as && V.as[d.channel];
+  if (!V.connected || !['short', 'thread'].includes(d.format) || d.channel !== 'x') return null;
+  if (!as) return h('a', { class: 'mut', href: '#/settings', style: 'font-size:.8rem' }, 'Post It: choose an X profile');
+  const busy = S.posting === d.id;
+  return h('button', { class: 'btn postit', disabled: !!S.posting, title: `Approve this exact text and post it to X as ${as} now, through Vista Social`, onclick: async () => {
+    const t = (S.editing === d.id && $('#ed-' + d.id)) ? null : d.text;
+    if (!t) { toast('Save your edit first'); return; }
+    if (!confirm(`Post this to X as ${as} now?${bad ? '\n\nThe honesty guard has objections: ' + d.guard.problems.join('; ') : ''}\n\n${t}`)) return;
+    S.posting = d.id; schedule();
+    const r = await dpost({ op: 'post-it', id: d.id });
+    S.posting = null; schedule();
+    if (r && r.ok) toast(`Posted to X as ${as}`);
+  } }, busy ? 'Posting…' : 'Post It!');
+}
 function draftCard(d) {
   const m0 = d.source.moments && S.moments.get(d.source.moments[0]);
   const bad = d.guard && !d.guard.ok;
@@ -636,7 +652,8 @@ function draftCard(d) {
     h('div', { class: 'reports' },
       h('div', { class: rcount ? 'rep warn' : 'rep ok' }, rcount ? `Redaction masked ${rcount} item${rcount === 1 ? '' : 's'}: ${d.redaction.summary.map((x) => `${x.rule} ×${x.n}`).join(', ')}` : 'Redaction: nothing needed masking'),
       bad ? h('div', { class: 'rep warn' }, 'Honesty guard: ', d.guard.problems.join(' · ')) : h('div', { class: 'rep ok' }, 'Honesty guard: every number and quote traces to the log')),
-    d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`).join(' · ')) : null,
+    d.status === 'published' ? h('div', { class: 'rep ok' }, d.receipts.map((r) => (r.receipt.kind === 'vista' ? `Posted to ${r.receipt.network === 'twitter' ? 'X' : r.receipt.network} as ${r.receipt.profile} through Vista Social${r.receipt.post_id ? ` (post ${r.receipt.post_id})` : ''}` : `${r.receipt.kind === 'outbox' ? 'queued in the outbox' : 'written'}: ${r.receipt.path}`)).join(' · ')) : null,
+    d.fails && d.fails.length && open ? h('div', { class: 'rep warn' }, 'Last attempt failed: ', d.fails[d.fails.length - 1].error) : null,
     d.status === 'declined' && d.declined.reason ? h('div', { class: 'mut' }, `Declined: ${d.declined.reason}`) : null,
     d.status === 'replaced' ? h('div', { class: 'mut' }, 'Replaced by a rewrite') : null,
     d.status === 'discarded' ? h('div', { class: 'acts' }, h('span', { class: 'mut' }, 'Removed'), h('button', { class: 'btn', onclick: () => dpost({ op: 'restore', id: d.id }) }, 'Restore')) : null,
@@ -645,6 +662,7 @@ function draftCard(d) {
       editing ? [h('button', { class: 'btn prim', onmousedown: (e) => e.preventDefault(), onclick: saveEdit }, 'Save', h('kbd', {}, 'Ctrl+Enter')), h('button', { class: 'btn', onmousedown: (e) => e.preventDefault(), onclick: () => { S.editing = null; schedule(); } }, 'Cancel', h('kbd', {}, 'Esc'))]
         : [h('button', { class: 'btn prim', onclick: async () => { const r = await dpost({ op: 'approve', id: d.id }); if (r && r.held) toast('Approved. Held: ' + r.held); else if (r && r.published) toast('Published'); } }, bad ? 'Approve anyway' : 'Approve'),
           h('label', { class: 'sched' }, 'or at ', h('input', { type: 'datetime-local', 'aria-label': 'Publish at', onchange: (e) => { if (e.target.value) dpost({ op: 'approve', id: d.id, at: new Date(e.target.value).toISOString() }); } })),
+          postIt(d, bad),
           h('button', { class: 'btn', onclick: startEdit }, 'Edit'),
           h('button', { class: 'btn', title: 'Remove this draft. Unlike Decline, it teaches autopilot nothing; you can restore it from the closed list.', onclick: async () => { const r = await dpost({ op: 'discard', id: d.id, reason: 'removed' }); if (r) toast('Removed. Restore it from the closed list below.'); } }, 'Remove'),
           dec || h('button', { class: 'btn', onclick: () => { S.declining = d.id; schedule(); setTimeout(() => { const t = $('#dr-' + d.id); if (t) t.focus(); }, 30); } }, 'Decline'),
@@ -801,6 +819,16 @@ async function vpost(body) {
   try { return await api('/api/vista', { method: 'POST', headers: { 'content-type': 'application/json', 'x-cts': '1' }, body: JSON.stringify(body) }); } catch (e) { toast((e.body && e.body.error) || e.message); return null; }
 }
 const loadVista = () => api('/api/vista').then((v) => { const was = S.vista && S.vista.connected; S.vista = v; if (v.connected && !was && S.vistaWait) { S.vistaWait = false; toast('Vista Social connected'); } schedule(); }).catch(() => {});
+/** Which X profile Post It posts as. The list is fetched only when you ask for it. */
+function vistaAs() {
+  const cur = S.drafts && S.drafts.vista && S.drafts.vista.as.x;
+  const pick = async (p) => { const r = await vpost({ op: 'use', channel: 'x', profile_id: p ? p.id : null, name: p ? (p.username ? '@' + p.username : p.name) : null }); if (r) { S.vistaProfiles = null; S.drafts = await api('/api/drafts'); toast(p ? `X drafts post as ${p.username ? '@' + p.username : p.name}` : 'Post It turned off for X'); schedule(); } };
+  return h('div', { class: 'acts' }, h('span', {}, 'X drafts post as: ', h('b', {}, cur || 'nobody yet')),
+    S.vistaProfiles ? h('select', { 'aria-label': 'X profile for Post It', onchange: (e) => { const p = S.vistaProfiles.find((x) => String(x.id) === e.target.value); e.target.blur(); pick(p || null); } },
+      h('option', { value: '' }, 'Choose…'), S.vistaProfiles.map((p) => h('option', { value: p.id, disabled: p.status !== 'ok' }, `${p.username ? '@' + p.username : p.name}${p.status !== 'ok' ? ` (${p.status})` : ''}`)))
+      : h('button', { class: 'btn', onclick: async () => { const r = await vpost({ op: 'profiles', channel: 'x' }); if (r) { S.vistaProfiles = r.profiles; if (!r.profiles.length) toast('No X profiles on this Vista Social account'); schedule(); } } }, cur ? 'Change' : 'Choose X profile'),
+    cur ? h('button', { class: 'btn', onclick: () => pick(null) }, 'Turn off') : null);
+}
 function vistaBox() {
   const V = S.vista;
   if (!V) { loadVista(); return h('section', { class: 'sbox' }, h('h3', {}, 'Vista Social'), h('div', { class: 'mut' }, 'Loading…')); }
@@ -814,6 +842,7 @@ function vistaBox() {
       : h('div', { class: 'acts' }, h('button', { class: 'btn prim', onclick: connect }, 'Connect Vista Social'), S.vistaWait ? h('span', { class: 'mut' }, 'Finish signing in in the tab that opened…') : null,
         h('span', { class: 'mut' }, 'or a key link:'), h('input', { id: 'vlink', type: 'text', placeholder: 'https://mcp.vistasocial.com/…', 'aria-label': 'Vista Social key link' }),
         h('button', { class: 'btn', onclick: async () => { const v = $('#vlink').value; const r = await vpost({ op: 'link', url: v }); if (r) { S.vista = r; toast('Saved'); schedule(); } } }, 'Save link')),
+    V.connected ? vistaAs() : null,
     S.vistaTools ? h('details', { class: 'vtools' }, h('summary', {}, `${S.vistaTools.length} tools on your account`), h('ul', {}, S.vistaTools.map((t) => h('li', {}, h('code', {}, t.name), ' ', h('span', { class: 'mut' }, trunc(t.description, 140)))))) : null);
 }
 function viewSettings(main) {
