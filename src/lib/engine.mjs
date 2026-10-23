@@ -1,6 +1,6 @@
 // The signal layer, Tier 1: deterministic detectors, threads, sessions and arcs.
 // Pure and replayable: feed it the same ordered events and you get the same moments (that is what `cts reindex` relies on).
-import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf } from './parse.mjs';
+import { testSegment, testVerdict, parseCounts, failedTests, skeleton, deploySegment, tagName, DEP_REMOVE_RE, DEP_ADD_RE, RM_RE, HEDGE_RE, DECISIVE_RE, hedgeSentence, topicsOf, errorSigs, PROBLEM_RE, promptTopics, sameAsk } from './parse.mjs';
 import { trunc } from './util.mjs';
 import { DraftStore } from './drafts.mjs';
 
@@ -249,6 +249,10 @@ export class Engine {
     } else if (mad) {
       this.emit(S, 'frustration', [ev], { base: BASE.frustration + (sure ? 10 : 0), actors: ['human'], headline: `You were losing patience: “${trunc(text, 90)}”`, evidence: { prompt: trunc(text, 600), after_confident: sure }, who: ev.d.who });
     }
+    // The session's first request, or an error pasted into any prompt, seen in an earlier session.
+    const ask = !S.asked && PROBLEM_RE.test(text) ? { text, topics: promptTopics(text) } : null;
+    S.asked = true;
+    this.recurCheck(S, ev, t, { errors: errorSigs(text), ask });
     this.hedgeFrom(S, ev, t, text);
     if (DECISIVE_RE.test(text)) this.closeByTopics(S, ev, t, topicsOf(text), 'decision');
   }
@@ -323,6 +327,7 @@ export class Engine {
       }
     }
     if (tst && tst.red != null) this.onTest(S, ev, tst, key, red, t);
+    else if (red && d.tool === 'Bash') this.recurCheck(S, ev, t, { errors: errorSigs(d.out) });
     if (d.git && !fail) this.onGit(S, ev, t);
     if (d.tool === 'Bash' && !fail) this.onBash(S, ev, t);
   }
@@ -361,7 +366,7 @@ export class Engine {
 
   onTest(S, ev, tst, key, red, t) {
     if (!red) { S.lastGreen.set(key, { ev, total: tst.total || 0 }); return; }
-    this.recurCheck(S, ev, t);
+    this.recurCheck(S, ev, t, { tests: failedTests(ev.d.out) });
     const g = S.lastGreen.get(key);
     if (!g) return;
     S.lastGreen.delete(key);
@@ -374,25 +379,34 @@ export class Engine {
     });
   }
 
-  /** The same failing test in an earlier session: a problem that keeps coming back. One moment per session per test. */
-  recurCheck(S, ev, t) {
-    const names = failedTests(ev.d.out);
-    if (!names.length) return;
-    const hist = (this.failHist ||= new Map()), hits = [];
-    let n = 0, first = t;
-    for (const name of names) {
-      const sig = (S.demo ? 'demo:' : '') + name, seen = hist.get(sig) || {};
-      const before = Object.entries(seen).filter(([sid, t0]) => sid !== S.sid && t0 < t);
-      if (before.length && !(S.recur ||= new Set()).has(sig)) { S.recur.add(sig); hits.push(name); n = Math.max(n, before.length); first = Math.min(first, ...before.map(([, t0]) => t0)); }
+  /** A problem that keeps coming back: the same failing test, error or opening request as in an earlier session. One moment per session per signature. */
+  recurCheck(S, ev, t, { tests = [], errors = [], ask = null }) {
+    if (!tests.length && !errors.length && !ask) return;
+    const hist = (this.failHist ||= new Map()), hits = [], pre = S.demo ? 'demo:' : '';
+    let n = 0, first = t, via = null;
+    const see = (sig, label, kind, also = []) => {
+      const seen = hist.get(sig) || {}, before = new Map();
+      for (const o of [seen, ...also]) for (const [sid, t0] of Object.entries(o)) if (sid !== S.sid && t0 < t) before.set(sid, Math.min(t0, before.get(sid) ?? t0));
+      if (before.size && !(S.recur ||= new Set()).has(sig)) { S.recur.add(sig); hits.push(label); via ||= kind; n = Math.max(n, before.size); first = Math.min(first, ...before.values()); }
       if (!(S.sid in seen)) { seen[S.sid] = t; hist.delete(sig); hist.set(sig, seen); }
       if (hist.size > 2000) hist.delete(hist.keys().next().value);
+    };
+    for (const name of tests) see(pre + name, name, 'test');
+    for (const e of errors) see(`${pre}err:${e}`, e, 'error');
+    if (ask) {
+      // Prompts rarely repeat word for word: match earlier first prompts by topic overlap (sameAsk), keyed by their topic list.
+      const p = `${pre}ask:`, also = [];
+      for (const [k, v] of hist) if (k.startsWith(p) && sameAsk(ask.topics, k.slice(p.length).split(' '))) also.push(v);
+      see(p + ask.topics.join(' '), trunc(ask.text.trim().split('\n')[0], 90), 'prompt', also);
     }
     if (!hits.length) return;
+    const where = `also in ${n} earlier session${n === 1 ? '' : 's'}`;
+    const headline = via === 'prompt' ? `Back with the same problem: “${hits[0]}”, ${where}` : `${via === 'error' ? 'Same error again' : 'Failing again'}: ${trunc(hits[0], 70)}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}, ${where}`;
+    const what = via === 'prompt' ? 'You opened a session with this problem' : via === 'error' ? `${hits.length === 1 ? 'This error' : 'These errors'} showed up` : `${hits.length === 1 ? 'This test' : 'These tests'} failed`;
     this.emit(S, 'recurring', [ev], {
-      base: Math.min(85, BASE.recurring + 10 * (n - 1)),
-      headline: `Failing again: ${trunc(hits[0], 70)}${hits.length > 1 ? ` (+${hits.length - 1} more)` : ''}, also in ${n} earlier session${n === 1 ? '' : 's'}`,
-      body: [`${hits.length === 1 ? 'This test' : 'These tests'} failed in ${n} earlier session${n === 1 ? '' : 's'}, first ${Math.max(1, Math.round((t - first) / DAY))} day(s) ago.`],
-      evidence: { tests: hits, sessions: n, since_first_ms: t - first, error: trunc(ev.d.out, 500) },
+      base: Math.min(85, BASE.recurring + 10 * (n - 1)), headline, actors: via === 'prompt' ? ['human'] : undefined, who: via === 'prompt' ? ev.d.who : undefined,
+      body: [`${what} in ${n} earlier session${n === 1 ? '' : 's'}, first ${Math.max(1, Math.round((t - first) / DAY))} day(s) ago.`],
+      evidence: { via, sessions: n, since_first_ms: t - first, ...(via === 'test' ? { tests: hits } : via === 'error' ? { errors: hits } : { prompt: trunc(ev.d.text, 600) }), ...(via === 'prompt' ? {} : { error: trunc(ev.d.out || ev.d.text || '', 500) }) },
     });
   }
 

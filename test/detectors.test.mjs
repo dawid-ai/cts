@@ -298,6 +298,44 @@ test('recurring: a test that failed in an earlier session fails again; one momen
   assert.ok(!has(run((s) => { s.start(); s.bash('npm test', { ok: false, out: NODE_RED }); s.bash('npm test', { ok: false, out: NODE_RED }); }), 'recurring'), 'the same session is not a recurrence');
 });
 
+let pid = 1000;
+const CRASH = (proc, sig) => `A process crashed on this machine and I want to know why.\n\nWhat systemd-coredump recorded:\n  process:  ${proc}\n  PID:      ${pid += 7919}\n  binary:   /usr/bin/${proc}\n  signal:   ${sig}\n\nUse the diagnose-crash skill: it covers how to investigate, what to report, and when a crash is worth reporting upstream.`;
+test('recurring from prompts: the same problem opening a later session, but not a different subject in the same template', () => {
+  const r = run((s) => {
+    for (const [sid, p] of [['a', CRASH('wireplumber', 'SIGSEGV')], ['b', CRASH('chromium', 'SIGTRAP')], ['c', CRASH('wireplumber', 'SIGSEGV')], ['d', CRASH('wireplumber', 'SIGSEGV')]]) { s.sid = sid; s.start(); s.prompt(p); s.adv(60 * 24); }
+  });
+  const rec = r.moments.filter((m) => m.kind === 'recurring');
+  assert.deepEqual(rec.map((m) => [m.sid, m.evidence.via, m.evidence.sessions, m.score]), [['c', 'prompt', 1, 55], ['d', 'prompt', 2, 65]]);
+  assert.match(rec[0].headline, /^Back with the same problem: “A process crashed/);
+  assert.deepEqual(rec[0].actors, ['human']);
+  // A habitual opener is not a problem, and only a session's first prompt is a fingerprint.
+  const opener = 'resume the work from handover.md, read the checklist, then pick the next unchecked item and build it';
+  assert.ok(!has(run((s) => { for (const sid of ['a', 'b']) { s.sid = sid; s.start(); s.prompt(opener); s.adv(60); } }), 'recurring'));
+  assert.ok(!has(run((s) => { s.sid = 'a'; s.start(); s.prompt(CRASH('wireplumber', 'SIGSEGV')); s.adv(60); s.sid = 'b'; s.start(); s.prompt('add a dark mode toggle'); s.prompt(CRASH('wireplumber', 'SIGSEGV')); }), 'recurring'));
+});
+
+test('recurring from errors: the same normalized error in a failed command or a pasted log in a later session', () => {
+  const out = (n) => `node:internal/modules/cjs/loader:${n}\n  throw err;\nError: Cannot find module '/home/u/app/dist/server-${n}.js'\n    at Module._resolveFilename (node:internal:${n}:15)`;
+  const r = run((s) => {
+    s.sid = 'a'; s.start(); s.bash('node dist/server.js', { ok: false, out: out(1) }); s.adv(60 * 24);
+    s.sid = 'b'; s.start(); s.bash('node dist/server.js', { ok: false, out: out(2) }); s.bash('node dist/server.js', { ok: false, out: out(3) }); s.adv(60 * 24);
+    s.sid = 'c'; s.start(); s.prompt(`the server will not start:\n${out(4)}`);
+  });
+  const rec = r.moments.filter((m) => m.kind === 'recurring');
+  assert.deepEqual(rec.map((m) => [m.sid, m.evidence.via, m.evidence.sessions]), [['b', 'error', 1], ['c', 'error', 2]]);
+  assert.match(rec[0].headline, /^Same error again: Error: Cannot find module 'server-N\.js'/);
+  // A test run's assertion output and a successful command are not error signatures.
+  assert.ok(!has(run((s) => { for (const sid of ['a', 'b']) { s.sid = sid; s.start(); s.bash('cat log.txt', { out: 'TypeError: x is not a function' }); s.adv(60); } }), 'recurring'));
+});
+
+test('errorSigs: exception lines, TypeScript and rustc codes, normalized; source code and assertions ignored', async () => {
+  const { errorSigs } = await import('../src/lib/parse.mjs');
+  assert.deepEqual(errorSigs('src/a.ts(12,5): error TS2345: Argument of type \'number\' is not assignable'), ['error TS2345: Argument of type \'number\' is not assignable']);
+  assert.deepEqual(errorSigs('error[E0382]: borrow of moved value: `v`\n --> src/main.rs:4:5'), ['error[E0382]: borrow of moved value: `v`']);
+  assert.deepEqual(errorSigs('Traceback (most recent call last):\n  File "x.py", line 3\nKeyError: \'user_42\''), ['KeyError: \'user_N\'']);
+  assert.deepEqual(errorSigs('  throw new TypeError("bad")\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal'), []);
+});
+
 test('recurring survives a retention trim: the failure history is in the snapshot', async () => {
   const { Engine } = await import('../src/lib/engine.mjs');
   const { sim, eng } = run((s) => {

@@ -71,7 +71,8 @@ function storyLines(pr, m) {
     case 'escalation': return ['I switched models to get unstuck.'];
     case 'misread': return [E.after_confident ? 'The agent said it was done, but it had answered a different question than the one I asked.' : 'The agent took my request the wrong way, and I had to spell out what I actually meant.'];
     case 'frustration': return [E.after_confident ? 'It was supposed to be done, and it still was not doing what I needed. I was losing patience.' : 'I was losing patience: it still was not doing what I needed.'];
-    case 'recurring': { const n = E.sessions; return [n ? `A test I had already fought with in ${plural(n, 'earlier session')} failed again.` : 'A test I had already fought with before failed again.']; }
+    case 'recurring': { const n = E.sessions, when = n ? `in ${plural(n, 'earlier session')}` : 'before';
+      return [E.via === 'prompt' ? `I came back with a problem I had already brought up ${when}.` : E.via === 'error' ? `An error I had already hit ${when} showed up again.` : `A test I had already fought with ${when} failed again.`]; }
     case 'wait': return [E.minutes ? `The agent sat waiting ${E.minutes} minutes for me.` : 'The agent sat waiting for me.'];
     default: return [m.note || firstPerson(h)];
   }

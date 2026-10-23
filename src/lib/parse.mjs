@@ -184,3 +184,28 @@ export function topicsOf(text) {
   }
   return [...out].slice(0, 12);
 }
+
+// Error lines that name a problem: an exception class with its message, TypeScript and rustc codes. Assertion errors are the test runner's, not a signature.
+const ERROR_LINE = /(?:^|\):\s|\s-\s)\s*(?:Uncaught\s+)?((?!AssertionError\b)(?:[A-Z][A-Za-z]*)?(?:Error|Exception)|error TS\d{4,5}|error\[E\d{4}\])(?:\s*\[\w+\])?:\s*(\S.*?)\s*$/gm;
+/** Normalized error signatures in output or a pasted log (at most 5): paths become basenames, numbers and hex become N, so the same error matches across runs. */
+export function errorSigs(text) {
+  const out = new Set();
+  for (const m of String(text || '').matchAll(ERROR_LINE)) {
+    const msg = m[2].replace(/(?:[A-Za-z]:)?[\w.~-]*[\\/][\w.\\/-]+/g, (p) => p.split(/[\\/]/).pop()).replace(/0x[0-9a-f]+|\d+/gi, 'N').slice(0, 100);
+    if (msg.replace(/\W/g, '').length >= 3) out.add(`${m[1]}: ${msg}`);
+  }
+  return [...out].slice(0, 5);
+}
+// A prompt that brings a problem, as opposed to a habitual opener ("resume, check the handover").
+export const PROBLEM_RE = /\b(crash(?:ed|es|ing)?|error|exception|fail(?:s|ed|ing|ure)?|broken|bug|segfault|SIG(?:SEGV|ABRT|BUS|ILL|TRAP|FPE|KILL)|panic(?:ked)?|traceback|(?:doesn'?t|does not|isn'?t|is not|not) work(?:ing)?|stopped working|hangs?|freez(?:e|es|ing)|core dump(?:ed)?)\b/i;
+/** Every topic word of a prompt, uncapped: the fingerprint compared with other sessions' first prompts. */
+export function promptTopics(text) {
+  const out = new Set();
+  for (const m of String(text || '').slice(0, 4000).matchAll(/\b[A-Za-z][A-Za-z0-9_]{3,}\b/g)) { const w = m[0].toLowerCase(); if (!STOP.has(w)) out.add(w); }
+  return [...out].slice(0, 80);
+}
+/** Same problem asked again: 5+ shared topics, 80% overlap, and no swapped subject (one side's topics all appear in the other). */
+export function sameAsk(a, b) {
+  const B = new Set(b), shared = a.filter((x) => B.has(x)).length;
+  return shared >= 5 && shared / (a.length + b.length - shared) >= 0.8 && (shared === a.length || shared === b.length);
+}

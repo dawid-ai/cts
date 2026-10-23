@@ -50,7 +50,9 @@ Event schema: `docs/events.md`.
 Tier 1 detectors run deterministically as events arrive: `reversal` 60, `fight` 40+5/attempt (max 90), `disagreement` 70,
 `shipped` 65, `broke` 65, `pivot` 55, `memory-cut` 50, `refusal` 50, `wait` 20, `escalation` 45, `mark` 100,
 `misread` 55 (you say "I meant ..."), `frustration` 45 (your own words lose patience; both +10 right after a confident
-"done"), `recurring` 55+10 per earlier session (max 85: a test that failed in an earlier session fails again).
+"done"), `recurring` 55+10 per earlier session (max 85: a problem from an earlier session is back, as the same failing
+test, the same error line with paths and numbers normalized, or a first prompt that names a problem and matches an earlier
+session's first prompt topic for topic, so the same crash report counts but the same template about another process doesn't).
 Test verdicts come from the runner's own output (counts, then failure lines), so `npm test | tail` still reads as red.
 Scores, the fight threshold and the main-branch globs are configurable in `.cts/cts.json`:
 
