@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // Capture hook: read one payload, append one line, never block, never print (except SessionStart context).
+// Off unless the project opted in (`cts init`); headless sessions are skipped, so nothing is created or started for them.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { findRoot, ensureProject, gitMode, paths, serialize, pidAlive, readJson, ago, loadConfig, SERVER_FLAGS } from './lib/util.mjs';
+import { findRoot, ensureProject, gitMode, paths, serialize, pidAlive, readJson, ago, loadConfig, capturing, SERVER_FLAGS } from './lib/util.mjs';
 import { normalize } from './lib/normalize.mjs';
 import { register } from './lib/registry.mjs';
 import { tip } from './lib/statusline.mjs';
@@ -74,6 +75,7 @@ try {
   const raw = readStdin();
   const inp = raw.trim() ? JSON.parse(raw) : {};
   const root = findRoot(inp.cwd || process.cwd());
+  if (!capturing(root)) process.exit(0);
   const p = ensureProject(root);
   if (!fs.existsSync(p.paused)) {
     const ev = normalize(inp);

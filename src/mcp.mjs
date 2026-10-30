@@ -3,7 +3,7 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { Project } from './lib/project.mjs';
-import { findRoot, trunc, ago } from './lib/util.mjs';
+import { findRoot, trunc, ago, capturing } from './lib/util.mjs';
 import { writeHumanEvent } from './lib/log.mjs';
 import { evidenceLine } from './lib/share.mjs';
 import { hotspotText } from './lib/summary.mjs';
@@ -19,8 +19,9 @@ const TOOLS = [
   { name: 'cts_drafts', description: 'List drafted posts waiting in the review queue (read-only). Approving, editing and declining are done by the human in the dashboard or with `cts queue`; there is deliberately no tool for that.', inputSchema: { type: 'object', properties: { status: { type: 'string', description: 'pending (default), approved, published, declined, expired' } } } },
 ];
 
-export function makeHandler(root) {
-  const pr = Project.open(root);
+/** With off set (capture is off here, or the session is headless), the server lists no tools and touches no files. */
+export function makeHandler(root, { off = false } = {}) {
+  const pr = off ? null : Project.open(root);
   const fmtM = (m) => `- [${m.score}] ${m.kind} · ${new Date(m.t0).toISOString().slice(0, 16).replace('T', ' ')} · ${m.headline}${evidenceLine(m) ? ` (${evidenceLine(m)})` : ''} · id ${m.id}`;
   const calls = {
     cts_moments: (a) => {
@@ -63,8 +64,9 @@ export function makeHandler(root) {
     const ok = (result) => ({ jsonrpc: '2.0', id, result });
     if (method === 'initialize') return ok({ protocolVersion: (params && params.protocolVersion) || '2024-11-05', capabilities: { tools: {} }, serverInfo: { name: 'cts', version: VERSION } });
     if (method === 'ping') return ok({});
-    if (method === 'tools/list') return ok({ tools: TOOLS });
+    if (method === 'tools/list') return ok({ tools: off ? [] : TOOLS });
     if (method === 'tools/call') {
+      if (off) return ok({ isError: true, content: [{ type: 'text', text: 'CTS is off in this project. The user can turn it on with cts init.' }] });
       const fn = calls[params.name];
       if (!fn) return { jsonrpc: '2.0', id, error: { code: -32602, message: 'unknown tool ' + params.name } };
       try { return ok({ content: [{ type: 'text', text: fn(params.arguments || {}) }] }); } catch (e) { return ok({ isError: true, content: [{ type: 'text', text: String(e.message) }] }); }
@@ -77,7 +79,7 @@ export function makeHandler(root) {
 const isMain = process.argv[1] && fs.realpathSync(process.argv[1]) === fs.realpathSync(fileURLToPath(import.meta.url));
 if (isMain || process.env.CTS_MCP === '1') {
   const root = findRoot(process.env.CLAUDE_PROJECT_DIR || process.cwd());
-  const handle = makeHandler(root);
+  const handle = makeHandler(root, { off: !capturing(root) });
   let buf = '';
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (c) => {

@@ -69,7 +69,7 @@ test('registry: the hook registers a project once an hour; the dashboard lists p
   const stops = [];
   try {
     const a = tmp('cts-reg-a-'), b = tmp('cts-reg-b-');
-    for (const r of [a, b]) { fs.mkdirSync(path.join(r, '.git')); fs.mkdirSync(path.join(r, '.cts'), { recursive: true }); fs.writeFileSync(path.join(r, '.cts', 'cts.json'), JSON.stringify({ port: 0 })); }
+    for (const r of [a, b]) { fs.mkdirSync(path.join(r, '.git')); fs.mkdirSync(path.join(r, '.cts'), { recursive: true }); fs.writeFileSync(path.join(r, '.cts', 'cts.json'), JSON.stringify({ port: 0, capture: true })); }
     const fire = (root) => spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 's1', cwd: root, source: 'startup' }), env: { ...process.env, CTS_NO_SERVER: '1' }, encoding: 'utf8' });
     fire(a); fire(b);
     assert.deepEqual(listProjects().map((p) => path.basename(p.root)).sort(), [path.basename(a), path.basename(b)].sort());

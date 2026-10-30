@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { ulid, serialize, ensureProject, SCHEMA } from './util.mjs';
 
-const git = (root, args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'] });
+const git = (root, args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
 const rnd = (key) => crypto.createHash('sha1').update(key).digest().subarray(0, 10);
 
 /** Reads history from `repo` (default: the project itself, read-only either way) and writes events into `root`'s log. */

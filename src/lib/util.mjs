@@ -86,6 +86,8 @@ export function paths(root) {
 
 export const DEFAULT_CONFIG = {
   schema: SCHEMA,
+  capture: false,          // opt-in: `cts init` sets it in .cts/cts.json; true in ~/.cts/config.json records every project
+  captureHeadless: false,  // `claude -p` and SDK sessions (agents, scripts) are skipped unless this is true
   private: false,
   port: 4848,
   threshold: 50,
@@ -141,13 +143,18 @@ export const DEFAULT_CONFIG = {
 export function loadConfig(root) {
   const p = paths(root);
   let cfg = structuredClone(DEFAULT_CONFIG);
-  for (const f of [path.join(os.homedir(), '.cts', 'config.json'), p.config]) {
+  for (const f of [path.join(process.env.CTS_HOME || path.join(os.homedir(), '.cts'), 'config.json'), p.config]) {
     try { cfg = deepMerge(cfg, JSON.parse(fs.readFileSync(f, 'utf8'))); } catch { /* optional */ }
   }
   // X Premium allows posts up to 25,000 characters.
   const x = cfg.publishing.channels.x;
   if (x && x.premium) x.limit = Math.max(x.limit || 0, 25000);
   return cfg;
+}
+/** Whether the hook records here: the project opted in, and the session is interactive unless captureHeadless is set. */
+export function capturing(root, env = process.env) {
+  const cfg = loadConfig(root);
+  return cfg.capture === true && (cfg.captureHeadless === true || !/^sdk-/.test(env.CLAUDE_CODE_ENTRYPOINT || ''));
 }
 function deepMerge(a, b) {
   for (const [k, v] of Object.entries(b || {})) {
@@ -177,7 +184,7 @@ export function gitMode(root, mode) {
   let cur = ''; try { cur = fs.readFileSync(gi, 'utf8'); } catch { return null; }
   if (cur !== GITIGNORE.legacy) return cur === GITIGNORE.team ? 'team' : 'private';
   let tracked = '';
-  try { tracked = execFileSync('git', ['-C', root, 'ls-files', '--', '.cts/sessions'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { /* not a repo: nothing tracked */ }
+  try { tracked = execFileSync('git', ['-C', root, 'ls-files', '--', '.cts/sessions'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim(); } catch { /* not a repo: nothing tracked */ }
   if (tracked) return 'team';
   fs.writeFileSync(gi, GITIGNORE.private);
   return 'private';

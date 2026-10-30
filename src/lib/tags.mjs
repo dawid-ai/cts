@@ -5,7 +5,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 
 const DAY = 86400000, MIN = 60000;
-const git = (root, args) => { try { return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20 }).trim(); } catch { return ''; } };
+const git = (root, args) => { try { return execFileSync('git', ['-C', root, ...args], { encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 64 << 20, windowsHide: true }).trim(); } catch { return ''; } };
 const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
 
 /** Lines and files tracked in git (text files only, at most 20000 files and 2 MB each). Cached per HEAD for a minute. */

@@ -171,7 +171,7 @@ export function pickTemplate(d, avoid) {
 }
 
 // ---------- data ----------
-const repoLink = (root) => { try { const u = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); const m = /github\.com[:/]([^/]+\/[^/.]+)/.exec(u); return m ? `github.com/${m[1]}` : ''; } catch { return ''; } };
+const repoLink = (root) => { try { const u = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim(); const m = /github\.com[:/]([^/]+\/[^/.]+)/.exec(u); return m ? `github.com/${m[1]}` : ''; } catch { return ''; } };
 /** Everything a template may show, for a draft (or a source with no draft), redacted like any shared output. */
 export function imageData(pr, { draft, src } = {}) {
   const e = pr.engine, C = pr.cfg.images || {};
@@ -259,7 +259,7 @@ export function renderPng(svgFile, w, h) {
   const out = svgFile.replace(/\.svg$/, '.png');
   const page = svgFile.replace(/\.svg$/, '.html');
   fs.writeFileSync(page, `<!doctype html><html><head><style>html,body{margin:0;background:#000}</style></head><body><img src="${path.basename(svgFile)}" width="${w}" height="${h}" style="display:block"></body></html>`);
-  return new Promise((ok, no) => execFile(bin, ['--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1', `--window-size=${w},${h}`, '--virtual-time-budget=4000', `--screenshot=${out}`, 'file://' + page], { timeout: 45000 }, (err) => {
+  return new Promise((ok, no) => execFile(bin, ['--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1', `--window-size=${w},${h}`, '--virtual-time-budget=4000', `--screenshot=${out}`, 'file://' + page], { timeout: 45000, windowsHide: true }, (err) => {
     try { fs.rmSync(page); } catch { /* gone */ }
     if (err && !fs.existsSync(out)) return no(new Error('Chromium could not render the image: ' + String(err.message).slice(0, 160)));
     ok(out);
@@ -272,7 +272,7 @@ export function uploadGithub(pr, file, name) {
   const branch = G.branch || 'main', rel = [G.dir, name].filter(Boolean).join('/').replace(/^\/+/, '');
   const body = path.join(os.tmpdir(), `cts-upload-${crypto.randomBytes(6).toString('hex')}.json`);
   fs.writeFileSync(body, JSON.stringify({ message: `CTS image ${name}`, content: fs.readFileSync(file).toString('base64'), branch }));
-  return new Promise((ok, no) => execFile('gh', ['api', '--method', 'PUT', `repos/${G.repo}/contents/${rel}`, '--input', body], { timeout: 60000, maxBuffer: 8 << 20 }, (err, stdout, stderr) => {
+  return new Promise((ok, no) => execFile('gh', ['api', '--method', 'PUT', `repos/${G.repo}/contents/${rel}`, '--input', body], { timeout: 60000, maxBuffer: 8 << 20, windowsHide: true }, (err, stdout, stderr) => {
     try { fs.rmSync(body); } catch { /* gone */ }
     if (err) return no(new Error('GitHub upload failed: ' + String(stderr || err.message).trim().slice(0, 200)));
     try { const j = JSON.parse(stdout); ok((j.content && j.content.download_url) || `https://raw.githubusercontent.com/${G.repo}/${branch}/${rel}`); } catch { ok(`https://raw.githubusercontent.com/${G.repo}/${branch}/${rel}`); }

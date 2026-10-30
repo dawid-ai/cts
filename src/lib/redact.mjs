@@ -29,7 +29,7 @@ export function projectNames(root) {
     if (u && u.length >= 4 && !GENERIC_USERS.has(u.toLowerCase())) names.add(u);
   }
   try {
-    const url = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    const url = execFileSync('git', ['-C', root, 'remote', 'get-url', 'origin'], { encoding: 'utf8', timeout: 1000, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim();
     const m = /[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/.exec(url);
     if (m) { names.add(m[2]); names.add(m[1]); }
   } catch { /* no remote */ }

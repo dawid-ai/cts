@@ -13,7 +13,7 @@ const HELP = {
 
 usage: cts <command> [options]      (in Claude Code: /cts:<command>)
 
-  init [--demo] [--team|--private] [--statusline [--global] [--force]]   create .cts/, optionally load the sample session / enable the status line
+  init [--demo] [--team|--private] [--statusline [--global] [--force]]   turn capture on here (off by default), optionally load the sample session / enable the status line
   open [--no-browser]            start the server if needed and open the dashboard
   watch [--once] [--plain]       terminal companion for a split pane: last five moments, open threads, drafts
   status                         server state, event count, last moment
@@ -100,7 +100,7 @@ async function ensureServer(root) {
 }
 function openBrowser(url) {
   const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '""', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
-  try { spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref(); } catch { /* user can open the URL */ }
+  try { spawn(cmd[0], cmd[1], { detached: true, stdio: 'ignore', windowsHide: true }).on('error', () => {}).unref(); } catch { /* user can open the URL */ }
 }
 async function project(root) { const { Project } = await import('./lib/project.mjs'); return Project.open(root); }
 
@@ -135,7 +135,9 @@ export async function main(argv) {
     case 'pause': { if (args[0] === 'publishing') return killSwitch(root, true); const p = paths(root); fs.mkdirSync(p.cts, { recursive: true }); if (fs.existsSync(p.paused)) return out('already paused'); writeHumanEvent(root, 'pause', {}); fs.writeFileSync(p.paused, new Date().toISOString()); return out('capture paused. nothing is recorded until: cts resume'); }
     case 'resume': { if (args[0] === 'publishing') return killSwitch(root, false); const p = paths(root); if (!fs.existsSync(p.paused)) return out('not paused'); fs.rmSync(p.paused); writeHumanEvent(root, 'resume', {}); return out('capture resumed'); }
     case 'init': {
-      ensureProject(root);
+      const p = ensureProject(root);
+      const pc = readJson(p.config, {});
+      if (pc.capture !== true) fs.writeFileSync(p.config, JSON.stringify({ ...pc, capture: true }, null, 2) + '\n');
       const mode = gitMode(root, flag(args, '--team') ? 'team' : flag(args, '--private') ? 'private' : null);
       out(mode === 'team' ? 'git: .cts/ session logs are committed (team mode; cts init --private keeps them local)' : 'git: .cts/ stays out of git (cts init --team commits the session logs)');
       try { (await import('./lib/registry.mjs')).register(root); } catch { /* the registry is a convenience */ }
@@ -147,7 +149,7 @@ export async function main(argv) {
         if (install(f, { force: flag(args, '--force') }) === 'set') out('status line enabled in ' + shown + (global ? ' (every project)' : ''));
         else out(`kept the existing status line in ${shown}; add --force to replace it`);
       } else out('tip: cts init --statusline [--global] adds a CTS segment to Claude Code\'s status line');
-      return out(`ready: ${paths(root).cts}\nnext: cts open`);
+      return out(`ready: ${p.cts}\ncapture on: every interactive session in this project is recorded (headless claude -p sessions are not)\nnext: cts open`);
     }
     case 'demo': {
       const { writeDemo, clearDemo } = await import('./lib/sample.mjs');

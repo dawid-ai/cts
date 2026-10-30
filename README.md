@@ -22,8 +22,12 @@ claude plugin install cts@claude-skills
 
 CTS lives in https://github.com/dawid-ai/cts; the `claude-skills` marketplace points at it. For a quick local try: `claude --plugin-dir /path/to/cts`.
 
-Then work as you always do. The first session start creates `.cts/` in your repo (or working directory) and starts the
-dashboard server in the background. Open it with `/cts:open` (or `cts open` in a terminal, the plugin puts `cts` on PATH).
+Capture is off until you turn it on for a project: run `/cts:init` (or `cts init`) once in it. That writes `"capture": true` into
+`.cts/cts.json`, and from then on every interactive session in that project is recorded and starts the dashboard server in the
+background. `"capture": true` in `~/.cts/config.json` turns it on for every project. Headless sessions (`claude -p` and the SDKs,
+which is how agents and scripts run Claude Code) are never recorded unless you also set `"captureHeadless": true`. Where capture is
+off, the hook exits at once, creates no `.cts/`, runs no git, and starts no server, and the MCP server lists no tools.
+Open the dashboard with `/cts:open` (or `cts open` in a terminal, the plugin puts `cts` on PATH).
 `cts init --demo` loads a sample two-session project so the first screen is never empty; `cts demo clear` removes it.
 
 Uninstall with `claude plugin uninstall cts`. Hooks go with the plugin; `.cts/` stays (delete the folder to erase the record).
@@ -244,7 +248,7 @@ with any separator or none (`my app`, `my-app`, `my_app`, `my/app`, `myapp`). Yo
 never the name. `cts consent summary` stores your choice in `.cts/cts.json` under `people`, so teammates in team mode (`cts init --team`) honour it:
 your prompts are withheld (replaced by a word count) from the story page, cards, Markdown export, events export, replay and drafts.
 `"share": { "prompts": "summary" }` sets the project default. Your local dashboard always shows everything.
-A prompt given to `claude -p` or the SDKs (an app's own agent calls, a script) belongs to its caller: it sits in a **claude -p** lane,
+With `"captureHeadless": true`, a prompt given to `claude -p` or the SDKs (an app's own agent calls, a script) belongs to its caller: it sits in a **claude -p** lane,
 carries no `d.who`, and never counts as you saying no, pulling back, or deciding. The session is marked `headless`.
 
 **Retention.** `"retentionDays": N` (0 by default: keep everything). Sessions that ended more than N days ago lose their raw events:
@@ -268,7 +272,7 @@ shows all of them with 30 days of activity and opens another project's dashboard
 ## Develop
 
 ```
-npm test                                # 108 tests: detectors, redaction, hooks, CLI, MCP, server, settings, reindex, retention, transcripts, extraction (manual and automatic), drafts, publish gate, notifications, consent, registry, exports/imports, network isolation
+npm test                                # 153 tests: detectors, redaction, hooks, CLI, MCP, server, settings, reindex, retention, transcripts, extraction (manual and automatic), drafts, publish gate, notifications, consent, registry, exports/imports, network isolation
 node scripts/bench.mjs 100000 --assert  # 100k-event project; fails if first paint > 500 ms, live update > 1 s or steady memory > 150 MB
 node scripts/shots.mjs <port>  # screenshots every dashboard view in light and dark (needs Playwright)
 claude plugin validate .

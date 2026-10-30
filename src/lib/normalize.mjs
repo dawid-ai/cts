@@ -50,7 +50,7 @@ function textOf(resp) {
 const tail = (s, n) => (s.length > n ? '…' + s.slice(-n) : s);
 
 function git(cwd, args) {
-  try { return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return ''; }
+  try { return execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8', timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true }).trim(); } catch { return ''; }
 }
 export function gitEnrich(cmd, cwd, ok) {
   const g = gitOp(cmd);

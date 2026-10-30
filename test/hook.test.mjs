@@ -11,7 +11,7 @@ import { paths } from '../src/lib/util.mjs';
 
 const HOOK = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'hook.mjs');
 const hooksJson = JSON.parse(fs.readFileSync(path.join(path.dirname(HOOK), '..', 'hooks', 'hooks.json'), 'utf8'));
-const proj = () => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-hook-')); fs.mkdirSync(path.join(d, '.git')); return d; };
+const proj = (cfg = { capture: true }) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-hook-')); fs.mkdirSync(path.join(d, '.git')); if (cfg) { fs.mkdirSync(path.join(d, '.cts')); fs.writeFileSync(path.join(d, '.cts', 'cts.json'), JSON.stringify(cfg)); } return d; };
 const fire = (root, payload, env = {}) => spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ session_id: 'sess1', cwd: root, transcript_path: path.join(root, 't.jsonl'), prompt_id: 'p1', permission_mode: 'default', ...payload }), env: { ...process.env, CTS_NO_SERVER: '1', CLAUDE_CODE_ENTRYPOINT: 'cli', ...env }, encoding: 'utf8' });
 const lines = (root, sid = 'sess1') => { const f = path.join(paths(root).sessions, sid + '.jsonl'); return fs.existsSync(f) ? readFrom(f).events : []; };
 
@@ -107,10 +107,11 @@ test('transcript byte offsets point at real positions', () => {
 });
 
 test('a git commit through Bash is enriched with branch, subject, files and diff stat', () => {
-  const root = proj(); fs.rmSync(path.join(root, '.git'), { recursive: true });
+  const root = proj(null);
   const g = (...a) => spawnSync('git', ['-C', root, ...a], { encoding: 'utf8' });
   g('init', '-q', '-b', 'main'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 'T');
   fs.writeFileSync(path.join(root, 'a.js'), 'one\ntwo\n'); g('add', '.'); g('commit', '-q', '-m', 'first commit');
+  fs.mkdirSync(path.join(root, '.cts')); fs.writeFileSync(path.join(root, '.cts', 'cts.json'), JSON.stringify({ capture: true }));
   fire(root, { hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "first commit"' }, tool_use_id: 'g1', tool_response: { stdout: '[main abc] first commit' } });
   const e = lines(root)[0];
   assert.equal(e.d.git.op, 'commit'); assert.equal(e.d.git.branch, 'main'); assert.equal(e.d.git.subject, 'first commit');
@@ -196,7 +197,7 @@ test('SessionStart shows the user one line about drafts awaiting review, unless 
   let out = JSON.parse(fire(root, { hook_event_name: 'SessionStart', source: 'startup' }).stdout);
   assert.match(out.systemMessage, /^CTS: 2 drafted posts await your review/);
   assert.match(out.hookSpecificOutput.additionalContext, /Do not approve or publish them yourself/);
-  fs.writeFileSync(paths(root).config, JSON.stringify({ notify: { terminal: false } }));
+  fs.writeFileSync(paths(root).config, JSON.stringify({ capture: true, notify: { terminal: false } }));
   out = JSON.parse(fire(root, { hook_event_name: 'SessionStart', source: 'startup' }).stdout);
   assert.equal(out.systemMessage, undefined);
 });
@@ -212,7 +213,7 @@ test('a background task notification injected as a user turn is not a human prom
 });
 
 test('a prompt in a headless session (`CLAUDE_CODE_ENTRYPOINT=sdk-cli`) is attributed to the caller', () => {
-  const root = proj();
+  const root = proj({ capture: true, captureHeadless: true });
   fire(root, { hook_event_name: 'SessionStart', source: 'startup' }, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' });
   fire(root, { hook_event_name: 'UserPromptSubmit', prompt: 'Reply with JSON only.' }, { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' });
   fire(root, { hook_event_name: 'UserPromptSubmit', prompt: 'and from the IDE' }, { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' });
@@ -241,6 +242,7 @@ test('SessionStart upgrades the old .cts/.gitignore to private, unless git alrea
     g('init', '-q'); g('config', 'user.email', 'a@b.c'); g('config', 'user.name', 'T');
     fs.mkdirSync(path.join(root, '.cts', 'sessions'), { recursive: true });
     fs.writeFileSync(path.join(root, '.cts', '.gitignore'), legacy);
+    fs.writeFileSync(path.join(root, '.cts', 'cts.json'), JSON.stringify({ capture: true }));
     fs.writeFileSync(path.join(root, '.cts', 'sessions', 'old.jsonl'), '');
     if (track) { g('add', '.cts'); g('commit', '-q', '-m', 'logs'); }
     fire(root, { hook_event_name: 'SessionStart', source: 'startup' });
@@ -248,4 +250,22 @@ test('SessionStart upgrades the old .cts/.gitignore to private, unless git alrea
   };
   assert.match(setup(false), /^\*$/m);
   assert.equal(setup(true), legacy, 'a team already sharing the logs keeps sharing them');
+});
+
+test('capture is off until the project opts in: no .cts/, no server, no context', () => {
+  const root = proj(null);
+  const r = fire(root, { hook_event_name: 'SessionStart', ...PAYLOADS.SessionStart });
+  fire(root, { hook_event_name: 'UserPromptSubmit', prompt: 'hello' });
+  assert.equal(r.stdout, ''); assert.equal(fs.existsSync(path.join(root, '.cts')), false);
+  const off = proj({ capture: false });
+  fire(off, { hook_event_name: 'UserPromptSubmit', prompt: 'hello' });
+  assert.equal(lines(off).length, 0);
+});
+
+test('headless sessions (`claude -p`, SDKs) are skipped unless captureHeadless is set', () => {
+  const root = proj();
+  for (const entry of ['sdk-cli', 'sdk-ts', 'sdk-py']) fire(root, { hook_event_name: 'UserPromptSubmit', prompt: 'from an agent' }, { CLAUDE_CODE_ENTRYPOINT: entry });
+  assert.equal(lines(root).length, 0);
+  fire(root, { hook_event_name: 'UserPromptSubmit', prompt: 'from me' });
+  assert.equal(lines(root).length, 1);
 });

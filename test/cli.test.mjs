@@ -86,6 +86,7 @@ test('server lifecycle via CLI: open starts it, statusline reads it, it works wi
 test('MCP: Claude can answer "what is still undecided?" with the same answer the dashboard shows', () => {
   const root = proj(); const sim = new Sim({ sid: 'm', start: Date.now() - 600000 });
   sim.start(); sim.prompt('go'); sim.stop('Wired it up with a flat file for now, revisit the storage layer later.'); write(root, sim);
+  fs.writeFileSync(paths(root).config, JSON.stringify({ port: 0, capture: true }));
   const msgs = [
     { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } } },
     { jsonrpc: '2.0', method: 'notifications/initialized' },
@@ -96,7 +97,7 @@ test('MCP: Claude can answer "what is still undecided?" with the same answer the
     { jsonrpc: '2.0', id: 6, method: 'tools/call', params: { name: 'cts_search', arguments: { query: 'flat file' } } },
     { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'cts_hotspots', arguments: {} } },
   ];
-  const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'mcp.mjs')], { input: msgs.map((m) => JSON.stringify(m)).join('\n') + '\n', env: { ...process.env, CLAUDE_PROJECT_DIR: root }, encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'src', 'mcp.mjs')], { input: msgs.map((m) => JSON.stringify(m)).join('\n') + '\n', env: { ...process.env, CLAUDE_PROJECT_DIR: root, CLAUDE_CODE_ENTRYPOINT: 'cli' }, encoding: 'utf8' });
   const out = Object.fromEntries(r.stdout.trim().split('\n').map((l) => JSON.parse(l)).map((o) => [o.id, o]));
   assert.equal(out[1].result.serverInfo.name, 'cts');
   assert.deepEqual(out[2].result.tools.map((t) => t.name), ['cts_moments', 'cts_threads', 'cts_search', 'cts_mark', 'cts_hotspots', 'cts_drafts']);
@@ -255,4 +256,20 @@ test('init --team commits the logs, --private keeps .cts/ out of git again', () 
   assert.match(cts(root, 'init').stdout, /team mode/, 'a plain init keeps the chosen mode');
   cts(root, 'init', '--private');
   assert.match(fs.readFileSync(gi, 'utf8'), /^\*$/m);
+});
+
+test('init turns capture on for the project and keeps the rest of cts.json', () => {
+  const root = proj();
+  const r = cts(root, 'init');
+  assert.equal(r.status, 0, r.stderr); assert.match(r.stdout, /capture on/);
+  assert.deepEqual(readJson(paths(root).config), { port: 0, capture: true });
+});
+
+test('the MCP server lists no tools and creates nothing where capture is off', async () => {
+  const { makeHandler } = await import('../src/mcp.mjs');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-mcp-'));
+  const h = makeHandler(root, { off: true });
+  assert.deepEqual(h({ id: 1, method: 'tools/list' }).result.tools, []);
+  assert.equal(h({ id: 2, method: 'tools/call', params: { name: 'cts_mark', arguments: {} } }).result.isError, true);
+  assert.equal(fs.existsSync(path.join(root, '.cts')), false);
 });

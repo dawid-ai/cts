@@ -23,8 +23,8 @@ Uninstall: `claude plugin uninstall cts@claude-skills` (hooks go with it; your `
 
 ## 3. First run, in any project
 
-1. Start Claude Code in a project and work as usual. Events are written to `.cts/sessions/` in that project (the folder is created on first use and stays out of git; `/cts:init --team` commits the logs so a team shares them).
-2. `/cts:init --demo` (optional) loads a sample session so the dashboard is not empty. `/cts:open` opens the dashboard at http://localhost:4848. `/cts:init --statusline --global` shows CTS in the status line of every project.
+1. Capture is off by default. In the project, run `/cts:init` once (`--demo` also loads a sample session so the dashboard is not empty). From then on, every interactive session there writes events to `.cts/sessions/` (the folder stays out of git; `/cts:init --team` commits the logs so a team shares them). Headless `claude -p` and SDK sessions are skipped (`"captureHeadless": true` in `.cts/cts.json` records them).
+2. `/cts:open` opens the dashboard at http://localhost:4848. `/cts:init --statusline --global` shows CTS in the status line of every project.
 3. `/cts:status` shows event count and the last moment. `/cts:mark note` flags a moment.
 4. `/cts:extract` runs the Tier 2 extractor. `/cts:draft last` drafts a post. `/cts:queue` lists drafts, `/cts:queue approve <id>` approves one (it is written to `.cts/outbox/`).
 5. Without Claude Code, from a terminal in the project: `node <path-to-cts>\bin\cts status` (or run `npm link` once in the CTS folder to get a plain `cts` command).

@@ -157,7 +157,7 @@ export function cropPng(buf, h) {
 let CHROME_OFFSET = null;
 function runBrowser(b, args) {
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-br-'));
-  try { return spawnSync(b, ['--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1', `--user-data-dir=${prof}`, ...args], { timeout: 60000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 24 }); }
+  try { return spawnSync(b, ['--headless', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--force-device-scale-factor=1', `--user-data-dir=${prof}`, ...args], { timeout: 60000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 1 << 24, windowsHide: true }); }
   finally { fs.rmSync(prof, { recursive: true, force: true }); }
 }
 /** Headless Chrome hides part of the requested window behind its frame (~87 px at the bottom). Measure it once, then over-ask and crop. */
@@ -243,7 +243,7 @@ if(hash.has('t')){cur=Math.max(0,Math.min(1,+hash.get('t')));playing=false;draw(
 }
 
 export function replayVideo(data, outFile, { fps = 10, seconds = 14, size = [1280, 720] } = {}) {
-  const ff = spawnSync(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-version'], { stdio: 'ignore' });
+  const ff = spawnSync(process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg', ['-version'], { stdio: 'ignore', windowsHide: true });
   if (ff.error || ff.status !== 0) throw new Error('ffmpeg not found on PATH (needed for .mp4/.gif). The replay .html works without it.');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cts-replay-'));
   try {
@@ -253,7 +253,7 @@ export function replayVideo(data, outFile, { fps = 10, seconds = 14, size = [128
     const gif = /\.gif$/i.test(outFile);
     const args = gif ? ['-y', '-framerate', String(fps), '-i', path.join(dir, 'f%04d.png'), '-vf', 'split[a][b];[a]palettegen[p];[b][p]paletteuse', outFile]
       : ['-y', '-framerate', String(fps), '-i', path.join(dir, 'f%04d.png'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outFile];
-    const r = spawnSync('ffmpeg', args, { stdio: 'ignore' });
+    const r = spawnSync('ffmpeg', args, { stdio: 'ignore', windowsHide: true });
     if (r.status !== 0) throw new Error('ffmpeg failed to encode the frames');
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   return outFile;
